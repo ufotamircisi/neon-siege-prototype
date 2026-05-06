@@ -379,6 +379,17 @@ html, body {
   color: var(--neon-cyan);
   text-shadow: 0 0 10px var(--neon-cyan);
   line-height: 1;
+  transition: color 0.2s;
+}
+
+#balls-count.balls-flash {
+  animation: ballsFlash 0.65s ease-out forwards;
+}
+
+@keyframes ballsFlash {
+  0%   { color: #ffffff; text-shadow: 0 0 24px #fff, 0 0 50px var(--neon-cyan); transform: scale(1.5); }
+  40%  { color: #00ff88; text-shadow: 0 0 18px #00ff88; transform: scale(1.2); }
+  100% { color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan); transform: scale(1); }
 }
 
 .balls-label { font-size: 10px; }

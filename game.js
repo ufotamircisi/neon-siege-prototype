@@ -16,7 +16,9 @@ const BLOCK_ROWS_MAX = 10;  // rows visible at once
 const DANGER_ROW = 11;      // blocks past this row = game over
 const UPGRADE_INTERVAL = 5; // every N stages show upgrade choice
 const BOSS_INTERVAL = 10;   // every N stages add boss block
-const FIRE_DELAY = 40;      // ms between successive ball launches
+const FIRE_DELAY = 55;      // ms between successive ball launches
+const MAX_ORBS = 2;         // max ball-pickup orbs on board simultaneously
+const ORB_SPAWN_CHANCE = 0.22; // probability of orb spawn per stage
 
 // Permanent upgrades config
 const PERM_UPGRADES = [
@@ -51,7 +53,7 @@ const PERM_UPGRADES = [
 
 // Roguelike run upgrades
 const RUN_UPGRADES = [
-  { id: 'ball_plus',    icon: '🔵', name: '+1 BALL',          desc: 'Fire one additional ball each turn.' },
+  { id: 'ball_plus',    icon: '🔵', name: '+1 BALL',          desc: 'Permanently add one more ball to your stream.' },
   { id: 'dmg_plus',     icon: '⚔️', name: '+1 DAMAGE',         desc: 'Each ball deals +1 damage per hit.' },
   { id: 'explode_hit',  icon: '💥', name: 'CHAIN REACTION',    desc: 'First hit each turn causes a small explosion.' },
   { id: 'crit_chance',  icon: '🎯', name: 'CRITICAL HIT',      desc: '15% chance for triple damage on any hit.' },
@@ -361,6 +363,115 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // ============================================================
+// FLOATING TEXT
+// ============================================================
+
+class FloatingText {
+  constructor(x, y, text, color) {
+    this.x = x; this.y = y;
+    this.text = text;
+    this.color = color;
+    this.life = 1.0;
+    this.vy = -1.8;
+  }
+  update() {
+    this.y += this.vy;
+    this.vy *= 0.94;
+    this.life -= 0.022;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, this.life);
+    ctx.fillStyle = this.color;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 10;
+    ctx.font = 'bold 14px \'Courier New\'';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.restore();
+  }
+  get dead() { return this.life <= 0; }
+}
+
+let floatingTexts = [];
+
+// ============================================================
+// BALL ORB  (collectible +1 ball pickup)
+// ============================================================
+
+class BallOrb {
+  constructor(col, row) {
+    this.col = col;
+    this.row = row;
+    this.alive = true;
+    this.pulse = Math.random() * Math.PI * 2;
+  }
+
+  get x() { return blockPad + this.col * (blockW + blockPad) + blockW / 2; }
+  get y() { return blockPad + this.row * (blockH + blockPad) + blockH / 2; }
+  get radius() { return Math.min(blockW, blockH) * 0.30; }
+
+  collect(game) {
+    if (!this.alive) return;
+    this.alive = false;
+    game.ballCount++;
+    game.updateHUD();
+    spawnParticles(this.x, this.y, '#00f5ff', 14, { speed: 4, decay: 0.028, size: 3 });
+    spawnParticles(this.x, this.y, '#bf00ff', 8,  { speed: 3, decay: 0.032, size: 2.5 });
+    floatingTexts.push(new FloatingText(this.x, this.y - 22, '+1 BALL', '#00f5ff'));
+    // Flash the HUD ball count
+    const el = document.getElementById('balls-count');
+    if (el) {
+      el.classList.remove('balls-flash');
+      void el.offsetWidth; // reflow to restart animation
+      el.classList.add('balls-flash');
+      setTimeout(() => el.classList.remove('balls-flash'), 700);
+    }
+  }
+
+  draw(ctx) {
+    if (!this.alive) return;
+    this.pulse += 0.075;
+    const r = this.radius;
+    const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+
+    ctx.save();
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 10 + glow * 14;
+
+    // Pulsing outer ring
+    ctx.strokeStyle = `rgba(0,245,255,${0.4 + glow * 0.45})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r + 3 + glow * 3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Orb body gradient
+    const grad = ctx.createRadialGradient(
+      this.x - r * 0.3, this.y - r * 0.35, 1,
+      this.x, this.y, r
+    );
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.35, '#00f5ff');
+    grad.addColorStop(1, '#6600cc');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // "+1" label
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.max(9, Math.floor(r * 0.85))}px 'Courier New'`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('+1', this.x, this.y);
+    ctx.restore();
+  }
+}
+
+// ============================================================
 // BALL
 // ============================================================
 
@@ -399,6 +510,16 @@ class Ball {
       if (!block.alive) continue;
       if (this.collidesBlock(block)) {
         this.resolveBlockCollision(block, game);
+      }
+    }
+
+    // Orb collision — collect on touch
+    for (const orb of game.orbs) {
+      if (!orb.alive) continue;
+      const odx = this.x - orb.x, ody = this.y - orb.y;
+      const minDist = BALL_RADIUS + orb.radius;
+      if (odx * odx + ody * ody < minDist * minDist) {
+        orb.collect(game);
       }
     }
   }
@@ -538,17 +659,6 @@ class Launcher {
     ctx.fill();
     ctx.restore();
 
-    // Aim dots
-    ctx.save();
-    ctx.setLineDash([5, 8]);
-    ctx.strokeStyle = 'rgba(0,245,255,0.25)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(ex, ey);
-    const dotLen = 80;
-    ctx.lineTo(ex + Math.cos(this.angle) * dotLen, ey + Math.sin(this.angle) * dotLen);
-    ctx.stroke();
-    ctx.restore();
   }
 }
 
@@ -598,7 +708,9 @@ class Game {
     // Game objects
     this.blocks = [];
     this.balls = [];
+    this.orbs = [];
     this.pendingBalls = 0;
+    this.firstReturnX = null; // X of first ball that exits bottom — for launcher snap
     this.launcher = new Launcher();
 
     // Input
@@ -642,7 +754,7 @@ class Game {
   // ---- Block spawning ----
 
   blockHpForStage(stage) {
-    return Math.ceil(1 + stage * 0.8 + (stage > 5 ? stage * 0.4 : 0));
+    return Math.ceil(1 + stage * 0.9 + (stage > 5 ? stage * 0.55 : 0));
   }
 
   spawnStageBlocks() {
@@ -672,9 +784,15 @@ class Game {
       this.blocks.push(new Block(col, 0, type, blockHp));
     }
 
-    // Apply shield barrier from permanent upgrade
-    if (this.startShieldLevel > 0 && stage === 1) {
-      // (handled via blocks; skip for simplicity in prototype)
+    // Spawn a ball-orb in a free column if conditions are met
+    const activeOrbs = this.orbs.filter(o => o.alive).length;
+    const needOrb = this.ballCount < 3 && stage <= 10; // guarantee early progression
+    if (activeOrbs < MAX_ORBS && (needOrb || Math.random() < ORB_SPAWN_CHANCE)) {
+      const occupiedCols = this.blocks.filter(b => b.row === 0).map(b => b.col);
+      const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !occupiedCols.includes(c));
+      if (freeCols.length > 0) {
+        this.orbs.push(new BallOrb(randItem(freeCols), 0));
+      }
     }
   }
 
@@ -697,6 +815,14 @@ class Game {
     }
   }
 
+  descendOrbs() {
+    for (const orb of this.orbs) {
+      orb.row += 1;
+    }
+    // Orbs past the danger line simply vanish (no game over)
+    this.orbs = this.orbs.filter(o => o.row < DANGER_ROW);
+  }
+
   // ---- Shooting ----
 
   shoot() {
@@ -705,7 +831,7 @@ class Game {
     this.firstHitThisTurn = true;
     this.turn++;
 
-    const totalBalls = this.ballCount + (this.hasUpgrade('ball_plus') ? 1 : 0);
+    const totalBalls = this.ballCount;
     const piercing = this.hasUpgrade('piercing') ? 3 : 0;
     const spread = this.hasUpgrade('multishot');
     const lx = this.launcher.x;
@@ -801,8 +927,15 @@ class Game {
   processTurnEnd() {
     this.phase = GamePhase.TURN_END;
 
-    // Remove dead blocks
+    // Snap launcher to where first ball exited the bottom
+    if (this.firstReturnX !== null) {
+      this.launcher.x = clamp(this.firstReturnX, BALL_RADIUS + 12, W - BALL_RADIUS - 12);
+    }
+    this.firstReturnX = null;
+
+    // Remove dead blocks and orbs
     this.blocks = this.blocks.filter(b => b.alive);
+    this.orbs = this.orbs.filter(o => o.alive);
 
     // Shard regen upgrade
     if (this.hasUpgrade('regen')) this.earnShards(5);
@@ -814,6 +947,7 @@ class Game {
 
     this.descendBlocks();
     if (this.phase === GamePhase.GAMEOVER) return;
+    this.descendOrbs();
 
     // Spawn new row for next stage
     this.stage++;
@@ -860,9 +994,13 @@ class Game {
   }
 
   pickUpgrade(upg) {
-    this.runUpgrades.push(upg.id);
-    if (upg.id === 'dmg_plus') this.ballDamage += 1;
-
+    if (upg.id === 'ball_plus') {
+      // Directly grows the stream — can be picked multiple times
+      this.ballCount++;
+    } else {
+      this.runUpgrades.push(upg.id);
+      if (upg.id === 'dmg_plus') this.ballDamage += 1;
+    }
     Screens.show('game');
     this.phase = GamePhase.IDLE;
     this.updateHUD();
@@ -890,8 +1028,7 @@ class Game {
     document.getElementById('hud-stage').textContent = this.stage;
     document.getElementById('hud-score').textContent = this.score;
     document.getElementById('hud-shards').textContent = this.shards;
-    const total = this.ballCount + (this.hasUpgrade('ball_plus') ? 1 : 0);
-    document.getElementById('balls-count').textContent = total;
+    document.getElementById('balls-count').textContent = this.ballCount;
   }
 
   updatePowerBar() {
@@ -907,7 +1044,12 @@ class Game {
     if (this.phase !== GamePhase.SHOOTING) return;
 
     for (const ball of this.balls) {
+      const wasActive = ball.active;
       ball.update(this);
+      // Capture the X of the FIRST ball to exit the bottom for launcher snap
+      if (wasActive && !ball.active && this.firstReturnX === null) {
+        this.firstReturnX = ball.x;
+      }
     }
 
     const activeBalls = this.balls.filter(b => b.active);
@@ -971,19 +1113,94 @@ class Game {
       ball.draw(ctx);
     }
 
-    // Aim indicator when idle
-    if (this.phase === GamePhase.IDLE && this.aiming) {
-      // Already drawn in launcher
+    // Aim guide (always visible in IDLE)
+    if (this.phase === GamePhase.IDLE) {
+      this.drawAimGuide(ctx);
     }
+
+    // Ball orbs
+    for (const orb of this.orbs) { orb.draw(ctx); }
 
     // Particles
     for (const p of particles) { p.draw(ctx); }
+
+    // Floating texts (drawn above particles)
+    for (const ft of floatingTexts) { ft.draw(ctx); }
 
     ctx.restore();
 
     // Update particles
     for (const p of particles) p.update();
     particles = particles.filter(p => !p.dead);
+
+    // Update floating texts
+    for (const ft of floatingTexts) ft.update();
+    floatingTexts = floatingTexts.filter(ft => !ft.dead);
+  }
+
+  // ---- Aim guide with single wall-bounce prediction ----
+
+  drawAimGuide(ctx) {
+    const lx = this.launcher.x, ly = launcherY;
+    const angle = this.launcher.angle;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const barrelLen = 42;
+    let x = lx + dx * barrelLen;
+    let y = ly + dy * barrelLen;
+    let vx = dx, vy = dy;
+
+    const totalLen = 260; // total guide length in px
+
+    ctx.save();
+    ctx.setLineDash([6, 9]);
+    ctx.lineWidth = 1.5;
+
+    // Find distance to nearest vertical wall
+    let tWall = Infinity;
+    if (vx < -0.001) tWall = (BALL_RADIUS - x) / vx;
+    else if (vx > 0.001) tWall = (W - BALL_RADIUS - x) / vx;
+
+    const distToWall = tWall < Infinity ? tWall : totalLen + 1;
+
+    if (distToWall < totalLen) {
+      // Segment 1: launcher tip → wall
+      const wx = x + vx * distToWall;
+      const wy = y + vy * distToWall;
+      ctx.strokeStyle = 'rgba(0,245,255,0.38)';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(wx, wy);
+      ctx.stroke();
+
+      // Wall bounce dot
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(0,245,255,0.55)';
+      ctx.shadowColor = '#00f5ff';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(wx, wy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Segment 2: reflected path (fainter)
+      const rem = totalLen - distToWall;
+      ctx.strokeStyle = 'rgba(0,245,255,0.16)';
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.lineTo(wx - vx * rem, wy + vy * rem);
+      ctx.stroke();
+    } else {
+      // No wall hit in range — simple straight guide
+      ctx.strokeStyle = 'rgba(0,245,255,0.38)';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + vx * totalLen, y + vy * totalLen);
+      ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 }
 
