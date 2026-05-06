@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Neon Siege</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Main Menu -->
+    <div id="screen-menu" class="screen active">
+      <div class="menu-bg"></div>
+      <div class="menu-content">
+        <div class="title-wrap">
+          <h1 class="title">NEON<br><span>SIEGE</span></h1>
+          <div class="title-sub">ARCADE ROGUELIKE</div>
+        </div>
+        <div class="stats-row">
+          <div class="stat-box">
+            <div class="stat-label">BEST STAGE</div>
+            <div class="stat-value" id="menu-best-stage">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">SHARDS</div>
+            <div class="stat-value" id="menu-shards">0</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-start">START RUN</button>
+        <button class="btn btn-secondary" id="btn-upgrades">UPGRADES</button>
+      </div>
+    </div>
+
+    <!-- Permanent Upgrades Screen -->
+    <div id="screen-upgrades" class="screen">
+      <div class="menu-bg"></div>
+      <div class="menu-content">
+        <h2 class="screen-title">PERMANENT UPGRADES</h2>
+        <div class="shards-display">
+          <span class="shard-icon">◈</span>
+          <span id="upg-shards">0</span> SHARDS
+        </div>
+        <div class="upgrade-list" id="perm-upgrade-list"></div>
+        <button class="btn btn-secondary" id="btn-back-menu">BACK</button>
+      </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="screen-game" class="screen">
+      <div id="hud">
+        <div class="hud-left">
+          <div class="hud-item">STAGE <span id="hud-stage">1</span></div>
+          <div class="hud-item">SCORE <span id="hud-score">0</span></div>
+        </div>
+        <div class="hud-center">
+          <div class="hud-item shard-hud">◈ <span id="hud-shards">0</span></div>
+        </div>
+        <div class="hud-right">
+          <button class="icon-btn" id="btn-pause">⏸</button>
+        </div>
+      </div>
+      <canvas id="gameCanvas"></canvas>
+      <div id="power-bar">
+        <button class="power-btn" id="btn-lightning" title="Lightning Strike">
+          <span class="pow-icon">⚡</span>
+          <span class="pow-count" id="pow-lightning-count">1</span>
+        </button>
+        <div id="balls-indicator">
+          <span id="balls-count">1</span> <span class="balls-label">BALLS</span>
+        </div>
+        <button class="power-btn" id="btn-bomb" title="Bomb">
+          <span class="pow-icon">💣</span>
+          <span class="pow-count" id="pow-bomb-count">1</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Pause Screen -->
+    <div id="screen-pause" class="screen overlay">
+      <div class="overlay-panel">
+        <h2 class="screen-title">PAUSED</h2>
+        <button class="btn btn-primary" id="btn-resume">RESUME</button>
+        <button class="btn btn-secondary" id="btn-restart-pause">RESTART</button>
+        <button class="btn btn-secondary" id="btn-menu-pause">MAIN MENU</button>
+      </div>
+    </div>
+
+    <!-- Upgrade Choice Screen -->
+    <div id="screen-upgrade-choice" class="screen overlay">
+      <div class="overlay-panel upgrade-choice-panel">
+        <h2 class="screen-title">CHOOSE UPGRADE</h2>
+        <div class="upgrade-cards" id="upgrade-cards"></div>
+      </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="screen-gameover" class="screen overlay">
+      <div class="overlay-panel">
+        <h2 class="screen-title gameover-title">GAME OVER</h2>
+        <div class="result-list">
+          <div class="result-row">
+            <span>Stage Reached</span>
+            <span id="go-stage">0</span>
+          </div>
+          <div class="result-row">
+            <span>Score</span>
+            <span id="go-score">0</span>
+          </div>
+          <div class="result-row highlight">
+            <span>◈ Shards Earned</span>
+            <span id="go-shards">0</span>
+          </div>
+          <div class="result-row">
+            <span>Best Stage</span>
+            <span id="go-best">0</span>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-restart-go">PLAY AGAIN</button>
+        <button class="btn btn-secondary" id="btn-menu-go">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
