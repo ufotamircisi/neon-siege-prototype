@@ -12,8 +12,9 @@
 const COLS = 7;
 const BALL_SPEED = 9;
 const BALL_RADIUS = 7;
-const BLOCK_ROWS_MAX = 10;  // rows visible at once
-const DANGER_ROW = 11;      // blocks past this row = game over
+const BLOCK_ROWS_MAX = 12;  // rows visible at once
+const DANGER_ROW = 14;      // blocks past this row = game over
+const WARNING_ROW = DANGER_ROW - 1; // danger warning one row before game over
 const UPGRADE_INTERVAL = 5; // every N stages show upgrade choice
 const BOSS_INTERVAL = 10;   // every N stages add boss block
 const FIRE_DELAY = 55;      // ms between successive ball launches
@@ -146,7 +147,7 @@ function resizeCanvas() {
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
 
-  blockPad = 4;
+  blockPad = 7;
   blockW = (W - blockPad * (COLS + 1)) / COLS;
   blockH = blockW * 0.55;
   launcherY = H - 48;
@@ -222,6 +223,8 @@ const BlockType = {
   SHIELD:    'shield',
   CRYSTAL:   'crystal',
   BOSS:      'boss',
+  TRIANGLE:  'triangle',
+  INV_TRI:   'inv_tri',
 };
 
 const BLOCK_COLORS = {
@@ -230,6 +233,8 @@ const BLOCK_COLORS = {
   [BlockType.SHIELD]:    { fill: '#051525', stroke: '#00ccff', glow: '#00ccff' },
   [BlockType.CRYSTAL]:   { fill: '#120b28', stroke: '#cc00ff', glow: '#ee88ff' },
   [BlockType.BOSS]:      { fill: '#1a0005', stroke: '#ff0044', glow: '#ff0044' },
+  [BlockType.TRIANGLE]:  { fill: '#081a10', stroke: '#00ff88', glow: '#00ff88' },
+  [BlockType.INV_TRI]:   { fill: '#1a0c00', stroke: '#ffaa00', glow: '#ffcc44' },
 };
 
 class Block {
@@ -298,9 +303,22 @@ class Block {
     ctx.shadowColor = colors.glow;
     ctx.shadowBlur = flash ? 20 : 8;
 
-    // fill
-    ctx.beginPath();
-    roundRect(ctx, x, y, blockW, blockH, 6);
+    // Shape path — triangles get their own outline; squares keep roundRect
+    if (this.type === BlockType.TRIANGLE) {
+      ctx.beginPath();
+      ctx.moveTo(x + blockW / 2, y + 2);
+      ctx.lineTo(x + blockW - 2, y + blockH - 2);
+      ctx.lineTo(x + 2,          y + blockH - 2);
+      ctx.closePath();
+    } else if (this.type === BlockType.INV_TRI) {
+      ctx.beginPath();
+      ctx.moveTo(x + 2,          y + 2);
+      ctx.lineTo(x + blockW - 2, y + 2);
+      ctx.lineTo(x + blockW / 2, y + blockH - 2);
+      ctx.closePath();
+    } else {
+      roundRect(ctx, x, y, blockW, blockH, 6);
+    }
     ctx.fillStyle = flash ? '#ffffff33' : colors.fill;
     ctx.fill();
 
@@ -701,6 +719,9 @@ class Game {
     this.runUpgrades = [];
     this.firstHitThisTurn = true;
 
+    // Danger state
+    this.warningActive = false;
+
     // Powers
     this.powLightning = 1;
     this.powBomb = 1;
@@ -761,6 +782,8 @@ class Game {
     const stage = this.stage;
     const hp = this.blockHpForStage(stage);
     const isBossStage = stage % BOSS_INTERVAL === 0;
+    // Triangles unlock at stage 5, density grows gradually, cap at 35%
+    const triChance = stage >= 5 ? Math.min(0.35, (stage - 4) * 0.05) : 0;
 
     // Generate one row of blocks at the top
     for (let col = 0; col < COLS; col++) {
@@ -769,6 +792,8 @@ class Game {
 
       if (isBossStage && col === Math.floor(COLS / 2)) {
         type = BlockType.BOSS;
+      } else if (triChance > 0 && Math.random() < triChance) {
+        type = Math.random() < 0.5 ? BlockType.TRIANGLE : BlockType.INV_TRI;
       } else if (rnd < 0.08) {
         type = BlockType.EXPLOSIVE;
       } else if (rnd < 0.16) {
@@ -806,13 +831,17 @@ class Game {
       block.row += (1 - slowBonus);
     }
 
-    // Check game over
+    // Check game over and warning row
+    let hitWarning = false;
     for (const block of this.blocks) {
-      if (block.alive && block.row >= DANGER_ROW) {
+      if (!block.alive) continue;
+      if (block.row >= DANGER_ROW) {
         this.triggerGameOver();
         return;
       }
+      if (block.row >= WARNING_ROW) hitWarning = true;
     }
+    this.warningActive = hitWarning;
   }
 
   descendOrbs() {
@@ -1009,6 +1038,7 @@ class Game {
   // ---- Game Over ----
 
   triggerGameOver() {
+    this.warningActive = false;
     this.phase = GamePhase.GAMEOVER;
 
     if (this.stage > saveData.bestStage) saveData.bestStage = this.stage;
@@ -1089,7 +1119,16 @@ class Game {
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
     }
 
-    // Danger line
+    // Warning row line (amber — one row before game over)
+    const warningY = blockPad + WARNING_ROW * (blockH + blockPad);
+    const wPulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
+    ctx.strokeStyle = `rgba(255,140,0,${0.25 + wPulse * 0.25})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.moveTo(0, warningY); ctx.lineTo(W, warningY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Danger line (red — game over boundary)
     const dangerY = blockPad + DANGER_ROW * (blockH + blockPad);
     const dangerPulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.004);
     ctx.strokeStyle = `rgba(255,0,68,${0.4 + dangerPulse * 0.4})`;
@@ -1128,6 +1167,22 @@ class Game {
     for (const ft of floatingTexts) { ft.draw(ctx); }
 
     ctx.restore();
+
+    // Danger warning border — drawn outside shake context so it stays stable
+    if (this.warningActive) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.008);
+      ctx.save();
+      // Subtle red screen tint
+      ctx.fillStyle = `rgba(255,0,68,${0.02 + pulse * 0.04})`;
+      ctx.fillRect(0, 0, W, H);
+      // Glowing red border
+      ctx.shadowColor = '#ff0044';
+      ctx.shadowBlur = 14 + pulse * 10;
+      ctx.strokeStyle = `rgba(255,0,68,${0.55 + pulse * 0.45})`;
+      ctx.lineWidth = 5;
+      ctx.strokeRect(2, 2, W - 4, H - 4);
+      ctx.restore();
+    }
 
     // Update particles
     for (const p of particles) p.update();
