@@ -225,6 +225,7 @@ const BlockType = {
   BOSS:      'boss',
   TRIANGLE:  'triangle',
   INV_TRI:   'inv_tri',
+  MYSTERY:   'mystery',
 };
 
 const BLOCK_COLORS = {
@@ -235,6 +236,35 @@ const BLOCK_COLORS = {
   [BlockType.BOSS]:      { fill: '#1a0005', stroke: '#ff0044', glow: '#ff0044' },
   [BlockType.TRIANGLE]:  { fill: '#081a10', stroke: '#00ff88', glow: '#00ff88' },
   [BlockType.INV_TRI]:   { fill: '#1a0c00', stroke: '#ffaa00', glow: '#ffcc44' },
+  [BlockType.MYSTERY]:   { fill: '#0d0020', stroke: '#bb44ff', glow: '#cc66ff' },
+};
+
+// Mystery effect pools
+const MYSTERY_GOOD = [
+  { id: 'bomb_burst',    label: '💥 BOOM!' },
+  { id: 'plus1_ball',    label: '+1 BALL!' },
+  { id: 'plus2_balls',   label: '+2 BALLS!' },
+  { id: 'shard_bonus',   label: '◈ SHARDS!' },
+  { id: 'weaken_near',   label: '⬇ WEAKENED!' },
+  { id: 'destroy_low',   label: '✓ CLEARED!' },
+  { id: 'mini_laser',    label: '⚡ LASER!' },
+];
+const MYSTERY_BAD = [
+  { id: 'boost_one_hp',    label: '↑ HP BOOST!' },
+  { id: 'boost_near_hp',   label: '↑↑ SURGE!' },
+  { id: 'triple_largest',  label: '✕3 TRIPLE!' },
+  { id: 'shuffle_blocks',  label: '~ SHUFFLE!' },
+  { id: 'spawn_extra',     label: '+ SPAWNED!' },
+  { id: 'strengthen_boss', label: '☠ CORE UP!' },
+];
+
+// Marker visuals
+const MARKER_COLORS = {
+  laser_h:     { fill: 'rgba(40,0,40,0.9)',  stroke: '#ff44cc', glow: '#ff44cc', label: '-' },
+  laser_v:     { fill: 'rgba(0,20,40,0.9)',  stroke: '#00ccff', glow: '#00ccff', label: '|' },
+  laser_cross: { fill: 'rgba(30,30,0,0.9)',  stroke: '#ffee00', glow: '#ffee00', label: '+' },
+  ball_boost:  { fill: 'rgba(0,30,10,0.9)',  stroke: '#00ff88', glow: '#00ff88', label: '+B' },
+  shuffle:     { fill: 'rgba(30,10,0,0.9)',  stroke: '#ff8800', glow: '#ff8800', label: '~' },
 };
 
 class Block {
@@ -290,6 +320,10 @@ class Block {
       screenShake(14, 9);
       game.earnShards(randInt(15, 25));
     }
+    if (this.type === BlockType.MYSTERY) {
+      spawnParticles(this.cx, this.cy, '#cc66ff', 14, { speed: 5, decay: 0.028, size: 4 });
+      game.applyMysteryEffect(this.col, this.row, this.cx, this.cy);
+    }
   }
 
   draw(ctx) {
@@ -339,16 +373,24 @@ class Block {
 
     ctx.restore();
 
-    // HP text
-    const ratio = this.hp / this.maxHp;
+    // Label — mystery shows '?' instead of HP
     ctx.save();
-    ctx.font = `bold ${blockH > 28 ? 13 : 10}px 'Courier New'`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = flash ? '#fff' : (ratio > 0.5 ? '#fff' : '#ff8888');
-    ctx.shadowColor = colors.glow;
-    ctx.shadowBlur = 4;
-    ctx.fillText(this.hp, x + blockW / 2, y + blockH / 2);
+    if (this.type === BlockType.MYSTERY) {
+      ctx.font = `bold ${blockH > 28 ? 17 : 14}px 'Courier New'`;
+      ctx.fillStyle = flash ? '#fff' : '#cc88ff';
+      ctx.shadowColor = '#bb44ff';
+      ctx.shadowBlur = 8;
+      ctx.fillText('?', x + blockW / 2, y + blockH / 2);
+    } else {
+      const ratio = this.hp / this.maxHp;
+      ctx.font = `bold ${blockH > 28 ? 13 : 10}px 'Courier New'`;
+      ctx.fillStyle = flash ? '#fff' : (ratio > 0.5 ? '#fff' : '#ff8888');
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 4;
+      ctx.fillText(this.hp, x + blockW / 2, y + blockH / 2);
+    }
     ctx.restore();
 
     // Boss indicator
@@ -490,6 +532,71 @@ class BallOrb {
 }
 
 // ============================================================
+// LASER BEAMS  (brief screen-flash effects)
+// ============================================================
+
+let laserBeams = []; // { x1,y1,x2,y2,color,life }
+
+// ============================================================
+// MARKER  (non-block tile triggered by ball contact)
+// ============================================================
+
+class Marker {
+  constructor(col, row, type) {
+    this.col = col;
+    this.row = row;
+    this.type = type;
+    this.alive = true;
+    this.pulse = Math.random() * Math.PI * 2;
+    this.cooldown = 0; // frames before next trigger allowed
+  }
+
+  get x()  { return blockPad + this.col * (blockW + blockPad); }
+  get y()  { return blockPad + this.row * (blockH + blockPad); }
+  get cx() { return this.x + blockW / 2; }
+  get cy() { return this.y + blockH / 2; }
+
+  draw(ctx) {
+    if (!this.alive) return;
+    this.pulse += 0.06;
+    const mc = MARKER_COLORS[this.type];
+    if (!mc) return;
+    const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+    const x = this.x, y = this.y;
+    const pad = Math.max(2, blockW * 0.08);
+
+    ctx.save();
+    ctx.shadowColor = mc.glow;
+    ctx.shadowBlur = 8 + glow * 10;
+
+    // Body (slightly inset to read differently from solid blocks)
+    roundRect(ctx, x + pad, y + pad, blockW - pad * 2, blockH - pad * 2, 4);
+    ctx.fillStyle = mc.fill;
+    ctx.fill();
+    ctx.strokeStyle = hexToRgba(mc.stroke, 0.7 + glow * 0.3);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Outer dashed border — distinguishes markers from blocks
+    ctx.setLineDash([4, 5]);
+    roundRect(ctx, x + 2, y + 2, blockW - 4, blockH - 4, 6);
+    ctx.strokeStyle = hexToRgba(mc.stroke, 0.3 + glow * 0.2);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Type label
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = mc.stroke;
+    ctx.font = `bold ${blockH > 28 ? 14 : 11}px 'Courier New'`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(mc.label, this.cx, this.cy);
+    ctx.restore();
+  }
+}
+
+// ============================================================
 // BALL
 // ============================================================
 
@@ -538,6 +645,14 @@ class Ball {
       const minDist = BALL_RADIUS + orb.radius;
       if (odx * odx + ody * ody < minDist * minDist) {
         orb.collect(game);
+      }
+    }
+
+    // Marker collision — balls pass through but trigger effects (with cooldown)
+    for (const marker of game.markers) {
+      if (!marker.alive || marker.cooldown > 0) continue;
+      if (this.collidesBlock(marker)) {
+        game.triggerMarker(marker, this);
       }
     }
   }
@@ -722,6 +837,9 @@ class Game {
     // Danger state
     this.warningActive = false;
 
+    // Mystery guard (prevent recursive mystery effects)
+    this.mysteryProcessing = false;
+
     // Powers
     this.powLightning = 1;
     this.powBomb = 1;
@@ -730,6 +848,7 @@ class Game {
     this.blocks = [];
     this.balls = [];
     this.orbs = [];
+    this.markers = [];
     this.pendingBalls = 0;
     this.firstReturnX = null; // X of first ball that exits bottom — for launcher snap
     this.launcher = new Launcher();
@@ -782,8 +901,8 @@ class Game {
     const stage = this.stage;
     const hp = this.blockHpForStage(stage);
     const isBossStage = stage % BOSS_INTERVAL === 0;
-    // Triangles unlock at stage 5, density grows gradually, cap at 35%
-    const triChance = stage >= 5 ? Math.min(0.35, (stage - 4) * 0.05) : 0;
+    const triChance     = stage >= 5 ? Math.min(0.35, (stage - 4) * 0.05) : 0;
+    const mysteryChance = stage >= 3 ? Math.min(0.10, (stage - 2) * 0.02) : 0;
 
     // Generate one row of blocks at the top
     for (let col = 0; col < COLS; col++) {
@@ -792,6 +911,8 @@ class Game {
 
       if (isBossStage && col === Math.floor(COLS / 2)) {
         type = BlockType.BOSS;
+      } else if (mysteryChance > 0 && Math.random() < mysteryChance) {
+        type = BlockType.MYSTERY;
       } else if (triChance > 0 && Math.random() < triChance) {
         type = Math.random() < 0.5 ? BlockType.TRIANGLE : BlockType.INV_TRI;
       } else if (rnd < 0.08) {
@@ -809,16 +930,37 @@ class Game {
       this.blocks.push(new Block(col, 0, type, blockHp));
     }
 
+    // Collect columns occupied at row 0
+    const takenCols = () => [
+      ...this.blocks.filter(b => b.row === 0).map(b => b.col),
+      ...this.orbs.filter(o => o.row === 0).map(o => o.col),
+      ...this.markers.filter(m => m.row === 0).map(m => m.col),
+    ];
+
     // Spawn a ball-orb in a free column if conditions are met
     const activeOrbs = this.orbs.filter(o => o.alive).length;
-    const needOrb = this.ballCount < 3 && stage <= 10; // guarantee early progression
+    const needOrb = this.ballCount < 3 && stage <= 10;
     if (activeOrbs < MAX_ORBS && (needOrb || Math.random() < ORB_SPAWN_CHANCE)) {
-      const occupiedCols = this.blocks.filter(b => b.row === 0).map(b => b.col);
-      const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !occupiedCols.includes(c));
+      const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols().includes(c));
       if (freeCols.length > 0) {
         this.orbs.push(new BallOrb(randItem(freeCols), 0));
       }
     }
+
+    // Spawn a marker in a free column (stage 2+)
+    const markerChance = stage >= 2 ? Math.min(0.28, (stage - 1) * 0.04) : 0;
+    if (markerChance > 0 && Math.random() < markerChance) {
+      const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols().includes(c));
+      if (freeCols.length > 0) {
+        this.markers.push(new Marker(randItem(freeCols), 0, this._pickMarkerType(stage)));
+      }
+    }
+  }
+
+  _pickMarkerType(stage) {
+    const types = ['laser_h', 'laser_v', 'laser_cross'];
+    if (stage >= 5) types.push('ball_boost', 'shuffle');
+    return randItem(types);
   }
 
   // ---- Descent ----
@@ -904,6 +1046,180 @@ class Game {
     screenShake(4, 3);
   }
 
+  // ---- Mystery block effect ----
+
+  applyMysteryEffect(col, row, cx, cy) {
+    if (this.mysteryProcessing) return; // prevent recursive mystery chains
+    this.mysteryProcessing = true;
+
+    const isGood = Math.random() < 0.60;
+    const pool = isGood ? MYSTERY_GOOD : MYSTERY_BAD;
+    const effect = randItem(pool);
+    let label = effect.label;
+    const color = isGood ? '#00ff88' : '#ff6600';
+    const alive = () => this.blocks.filter(b => b.alive && b.type !== BlockType.MYSTERY);
+
+    switch (effect.id) {
+      case 'bomb_burst':
+        this.explodeNear(col, row);
+        spawnExplosionParticles(cx, cy, '#ff6600');
+        screenShake(6, 4);
+        break;
+      case 'plus1_ball':
+        this.ballCount++;
+        this.updateHUD();
+        spawnParticles(cx, cy, '#00f5ff', 12, { speed: 3, decay: 0.025 });
+        break;
+      case 'plus2_balls':
+        this.ballCount += 2;
+        this.updateHUD();
+        spawnParticles(cx, cy, '#00f5ff', 18, { speed: 4, decay: 0.025 });
+        break;
+      case 'shard_bonus': {
+        const n = randInt(10, 20);
+        this.earnShards(n);
+        label = `+${n} SHARDS!`;
+        spawnParticles(cx, cy, '#cc00ff', 14, { speed: 3, gravity: -0.05, decay: 0.025 });
+        break;
+      }
+      case 'weaken_near':
+        for (const b of alive()) {
+          if (Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1) {
+            b.hp = Math.max(1, Math.floor(b.hp / 2));
+            b.hitFlash = 4;
+            spawnParticles(b.cx, b.cy, '#00ff88', 4, { speed: 2, decay: 0.07 });
+          }
+        }
+        break;
+      case 'destroy_low': {
+        const low = alive().sort((a, b) => a.hp - b.hp)[0];
+        if (low) { low.hp = 0; low.alive = false; low.onDestroy(this); }
+        break;
+      }
+      case 'mini_laser':
+        this._fireLaserRow(row);
+        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
+        break;
+      case 'boost_one_hp': {
+        const bl = randItem(alive());
+        if (bl) { bl.hp += 5; bl.maxHp = Math.max(bl.maxHp, bl.hp); bl.hitFlash = 5; }
+        break;
+      }
+      case 'boost_near_hp':
+        for (const b of alive()) {
+          if (Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1) {
+            b.hp += 2; b.maxHp = Math.max(b.maxHp, b.hp); b.hitFlash = 3;
+          }
+        }
+        break;
+      case 'triple_largest': {
+        const big = alive().sort((a, b) => b.hp - a.hp)[0];
+        if (big) {
+          big.hp *= 3; big.maxHp = Math.max(big.maxHp, big.hp); big.hitFlash = 8;
+          spawnParticles(big.cx, big.cy, '#ff0044', 12, { speed: 3, decay: 0.04 });
+        }
+        break;
+      }
+      case 'shuffle_blocks': {
+        const pool2 = alive();
+        const n = Math.min(4, pool2.length);
+        if (n >= 2) {
+          const picks = pool2.sort(() => Math.random() - 0.5).slice(0, n);
+          const positions = picks.map(b => ({ col: b.col, row: b.row }));
+          positions.sort(() => Math.random() - 0.5);
+          picks.forEach((b, i) => { b.col = positions[i].col; b.row = positions[i].row; });
+          spawnParticles(cx, cy, '#ff8800', 16, { speed: 5, decay: 0.035 });
+        }
+        break;
+      }
+      case 'spawn_extra': {
+        const takenCols = this.blocks.filter(b => b.alive && b.row === 0).map(b => b.col);
+        const free = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols.includes(c));
+        if (free.length > 0) {
+          this.blocks.push(new Block(randItem(free), 0, BlockType.NORMAL, this.blockHpForStage(this.stage)));
+        }
+        break;
+      }
+      case 'strengthen_boss': {
+        const boss = this.blocks.find(b => b.alive && b.type === BlockType.BOSS);
+        const target = boss || randItem(alive());
+        if (target) { target.hp += 5; target.maxHp = Math.max(target.maxHp, target.hp); target.hitFlash = 8; }
+        break;
+      }
+    }
+
+    floatingTexts.push(new FloatingText(cx, cy - 28, label, color));
+    this.mysteryProcessing = false;
+  }
+
+  // ---- Marker trigger ----
+
+  triggerMarker(marker, ball) {
+    marker.cooldown = 8;
+    const cx = marker.cx, cy = marker.cy;
+
+    switch (marker.type) {
+      case 'ball_boost':
+        marker.alive = false;
+        const bonus = Math.random() < 0.35 ? 2 : 1;
+        this.ballCount += bonus;
+        this.updateHUD();
+        spawnParticles(cx, cy, '#00ff88', 14, { speed: 4, decay: 0.025 });
+        floatingTexts.push(new FloatingText(cx, cy - 24, `+${bonus} BALL${bonus > 1 ? 'S' : ''}!`, '#00ff88'));
+        break;
+      case 'shuffle': {
+        const alive = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS);
+        const n = Math.min(4, alive.length);
+        if (n >= 2) {
+          const picks = alive.sort(() => Math.random() - 0.5).slice(0, n);
+          const positions = picks.map(b => ({ col: b.col, row: b.row }));
+          positions.sort(() => Math.random() - 0.5);
+          picks.forEach((b, i) => { b.col = positions[i].col; b.row = positions[i].row; });
+          spawnParticles(cx, cy, '#ff8800', 10, { speed: 4, decay: 0.04 });
+          floatingTexts.push(new FloatingText(cx, cy - 24, 'SHUFFLE!', '#ff8800'));
+        }
+        break;
+      }
+      case 'laser_h':
+        this._fireLaserRow(marker.row);
+        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 10 });
+        floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+        break;
+      case 'laser_v':
+        this._fireLaserCol(marker.col);
+        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 10 });
+        floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+        break;
+      case 'laser_cross':
+        this._fireLaserRow(marker.row);
+        this._fireLaserCol(marker.col);
+        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
+        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 10 });
+        floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+        break;
+    }
+  }
+
+  _fireLaserRow(row) {
+    for (const b of this.blocks) {
+      if (b.alive && b.row === row) {
+        b.hit(1, this);
+        spawnParticles(b.cx, b.cy, '#ff44cc', 4, { speed: 2, decay: 0.07 });
+      }
+    }
+    screenShake(3, 2);
+  }
+
+  _fireLaserCol(col) {
+    for (const b of this.blocks) {
+      if (b.alive && b.col === col) {
+        b.hit(1, this);
+        spawnParticles(b.cx, b.cy, '#00ccff', 4, { speed: 2, decay: 0.07 });
+      }
+    }
+    screenShake(3, 2);
+  }
+
   // ---- Powers ----
 
   useLightning() {
@@ -962,9 +1278,10 @@ class Game {
     }
     this.firstReturnX = null;
 
-    // Remove dead blocks and orbs
+    // Remove dead blocks, orbs, and markers
     this.blocks = this.blocks.filter(b => b.alive);
-    this.orbs = this.orbs.filter(o => o.alive);
+    this.orbs   = this.orbs.filter(o => o.alive);
+    this.markers = this.markers.filter(m => m.alive);
 
     // Shard regen upgrade
     if (this.hasUpgrade('regen')) this.earnShards(5);
@@ -977,6 +1294,10 @@ class Game {
     this.descendBlocks();
     if (this.phase === GamePhase.GAMEOVER) return;
     this.descendOrbs();
+
+    // Descend markers; remove any past the danger boundary
+    for (const m of this.markers) m.row += 1;
+    this.markers = this.markers.filter(m => m.alive && m.row < DANGER_ROW);
 
     // Spawn new row for next stage
     this.stage++;
@@ -1073,6 +1394,11 @@ class Game {
   update() {
     if (this.phase !== GamePhase.SHOOTING) return;
 
+    // Tick marker cooldowns
+    for (const marker of this.markers) {
+      if (marker.cooldown > 0) marker.cooldown--;
+    }
+
     for (const ball of this.balls) {
       const wasActive = ball.active;
       ball.update(this);
@@ -1159,6 +1485,29 @@ class Game {
 
     // Ball orbs
     for (const orb of this.orbs) { orb.draw(ctx); }
+
+    // Markers
+    for (const marker of this.markers) { marker.draw(ctx); }
+
+    // Laser beam flashes
+    for (const lb of laserBeams) {
+      ctx.save();
+      ctx.globalAlpha = lb.life / 10;
+      ctx.strokeStyle = lb.color;
+      ctx.shadowColor = lb.color;
+      ctx.shadowBlur = 16;
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(lb.x1, lb.y1); ctx.lineTo(lb.x2, lb.y2); ctx.stroke();
+      // Bright white core
+      ctx.globalAlpha = (lb.life / 10) * 0.45;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.moveTo(lb.x1, lb.y1); ctx.lineTo(lb.x2, lb.y2); ctx.stroke();
+      ctx.restore();
+      lb.life--;
+    }
+    laserBeams = laserBeams.filter(lb => lb.life > 0);
 
     // Particles
     for (const p of particles) { p.draw(ctx); }
