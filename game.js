@@ -73,6 +73,18 @@ const RUN_UPGRADES = [
   { id: 'overcharge',    icon: '🌩', name: 'OVERCHARGE',        desc: 'Electric chain jumps one extra time.', minStage: 8 },
 ];
 
+// Relic definitions (V4B — boss reward, current-run only)
+const RELICS = [
+  { id: 'broken_reactor',   icon: '☢', name: 'BROKEN REACTOR',   desc: 'Start of each turn: deal 1 damage to a random block.' },
+  { id: 'frozen_heart',     icon: '💙', name: 'FROZEN HEART',     desc: 'Every 4th turn a random row freezes for 1 turn.' },
+  { id: 'storm_lens',       icon: '🔭', name: 'STORM LENS',       desc: 'Laser markers deal +1 damage per hit.' },
+  { id: 'fire_crown',       icon: '👑', name: 'FIRE CROWN',       desc: 'Fire explosions damage a wider area.' },
+  { id: 'void_compass',     icon: '🧭', name: 'VOID COMPASS',     desc: 'After portal teleport, next hit deals +1 damage.' },
+  { id: 'siege_engine',     icon: '⚙', name: 'SIEGE ENGINE',     desc: '+2 balls this run. Blocks spawn slightly tougher.' },
+  { id: 'greedy_core',      icon: '💰', name: 'GREEDY CORE',      desc: '+50% shard gain. Mystery harmful events slightly more likely.' },
+  { id: 'emergency_shield', icon: '🛡', name: 'EMERGENCY SHIELD', desc: 'First warning row moment: push back the most dangerous block.' },
+];
+
 // ============================================================
 // SAVE DATA
 // ============================================================
@@ -286,6 +298,7 @@ class Block {
     this.alive = true;
     this.frozen = false;
     this.frozenTurns = 0;
+    this.bossType = null;
   }
 
   get x() { return blockPad + this.col * (blockW + blockPad); }
@@ -435,12 +448,14 @@ class Block {
     // Boss indicator
     if (this.type === BlockType.BOSS) {
       ctx.save();
-      ctx.font = `8px 'Courier New'`;
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#ff0044';
-      ctx.shadowColor = '#ff0044';
-      ctx.shadowBlur = 6;
+      ctx.shadowColor = '#ff0044'; ctx.shadowBlur = 6;
+      ctx.font = `8px 'Courier New'`; ctx.fillStyle = '#ff0044';
       ctx.fillText('CORE', x + blockW / 2, y + blockH - 6);
+      if (this.bossType) {
+        ctx.font = `6px 'Courier New'`; ctx.fillStyle = '#ff9999'; ctx.shadowBlur = 3;
+        ctx.fillText(this.bossType.split('_')[0].toUpperCase(), x + blockW / 2, y + 7);
+      }
       ctx.restore();
     }
   }
@@ -525,6 +540,109 @@ class ComboText {
     ctx.restore();
   }
   get dead() { return this.life <= 0; }
+}
+
+// ============================================================
+// BLACK HOLE  (V4B — gravity anomaly)
+// ============================================================
+
+class BlackHole {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.alive = true;
+    this.strength = 0.28;
+    this.pulse = Math.random() * Math.PI * 2;
+  }
+  get coreRadius() { return Math.min(blockW, blockH) * 0.36; }
+  get radius()     { return Math.min(blockW * 3.2, 96); }
+
+  update() { this.pulse += 0.04; }
+  descend() { this.y += blockH + blockPad; }
+
+  draw(ctx) {
+    const r = this.radius, cr = this.coreRadius;
+    const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+    ctx.save();
+
+    // Influence dashed ring
+    ctx.strokeStyle = `rgba(140,0,220,${0.13 + glow * 0.09})`;
+    ctx.lineWidth = 1; ctx.setLineDash([4, 6]);
+    ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Radial fog
+    const fog = ctx.createRadialGradient(this.x, this.y, cr * 0.2, this.x, this.y, r);
+    fog.addColorStop(0,   'rgba(70,0,150,0.52)');
+    fog.addColorStop(0.4, 'rgba(40,0,100,0.22)');
+    fog.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = fog;
+    ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI * 2); ctx.fill();
+
+    // Core
+    ctx.shadowColor = '#8800ff'; ctx.shadowBlur = 14 + glow * 10;
+    const cg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, cr);
+    cg.addColorStop(0, '#000000'); cg.addColorStop(0.55, '#2a0066'); cg.addColorStop(1, '#8800ff');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(this.x, this.y, cr, 0, Math.PI * 2); ctx.fill();
+
+    // Rotating accretion ring
+    ctx.shadowBlur = 6;
+    ctx.strokeStyle = `rgba(180,0,255,${0.5 + glow * 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.save();
+    ctx.translate(this.x, this.y); ctx.rotate(this.pulse * 0.65);
+    ctx.beginPath(); ctx.ellipse(0, 0, cr * 1.7, cr * 0.45, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PORTAL PAIR  (V4B — ball teleporter)
+// ============================================================
+
+class PortalPair {
+  constructor(ax, ay, bx, by) {
+    this.ax = ax; this.ay = ay;
+    this.bx = bx; this.by = by;
+    this.alive = true;
+    this.pulse = Math.random() * Math.PI * 2;
+  }
+  get radius() { return Math.min(blockW, blockH) * 0.44; }
+
+  update() { this.pulse += 0.07; }
+  descend() { this.ay += blockH + blockPad; this.by += blockH + blockPad; }
+
+  _drawSingle(ctx, x, y, rgb, glow) {
+    const r = this.radius;
+    ctx.save();
+    ctx.shadowColor = `rgba(${rgb},1)`; ctx.shadowBlur = 10 + glow * 12;
+    ctx.strokeStyle = `rgba(${rgb},${0.5 + glow * 0.45})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke();
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${rgb},0.48)`); g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(this.pulse);
+    ctx.strokeStyle = `rgba(${rgb},${0.65 + glow * 0.3})`; ctx.lineWidth = 1.5; ctx.shadowBlur = 5;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, Math.PI * 1.4); ctx.stroke();
+    ctx.restore();
+    ctx.restore();
+  }
+
+  draw(ctx) {
+    const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+    this._drawSingle(ctx, this.ax, this.ay, '0,245,255', glow);
+    this._drawSingle(ctx, this.bx, this.by, '255,68,204', glow);
+    ctx.save();
+    ctx.globalAlpha = 0.06 + 0.03 * Math.sin(this.pulse * 2);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.setLineDash([3, 8]);
+    ctx.beginPath(); ctx.moveTo(this.ax, this.ay); ctx.lineTo(this.bx, this.by); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
 }
 
 // ============================================================
@@ -678,6 +796,7 @@ class Ball {
     this.active = true;
     this.piercingLeft = opts.piercingLeft || 0;
     this.element = opts.element || null;
+    this.portalCooldown = 0;
     this.trail = [];
   }
 
@@ -727,6 +846,57 @@ class Ball {
         game.triggerMarker(marker, this);
       }
     }
+
+    // V4B: Portal teleport
+    if (game.portals) {
+      if (this.portalCooldown > 0) {
+        this.portalCooldown--;
+      } else {
+        for (const pp of game.portals) {
+          if (!pp.alive) continue;
+          const r = pp.radius;
+          const dxa = this.x - pp.ax, dya = this.y - pp.ay;
+          if (dxa * dxa + dya * dya < r * r) {
+            this.x = pp.bx; this.y = pp.by;
+            this.portalCooldown = 22;
+            spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
+            spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
+            if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
+            break;
+          }
+          const dxb = this.x - pp.bx, dyb = this.y - pp.by;
+          if (dxb * dxb + dyb * dyb < r * r) {
+            this.x = pp.ax; this.y = pp.ay;
+            this.portalCooldown = 22;
+            spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
+            spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
+            if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // V4B: Black hole gravity
+    if (game.blackHoles) {
+      for (const bh of game.blackHoles) {
+        if (!bh.alive) continue;
+        const dx = bh.x - this.x, dy = bh.y - this.y;
+        const distSq = dx * dx + dy * dy;
+        const r = bh.radius;
+        if (distSq < r * r && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const force = bh.strength / (dist + 1);
+          this.vx += (dx / dist) * force;
+          this.vy += (dy / dist) * force;
+          const spd = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+          if (spd > BALL_SPEED * 1.55) {
+            const sc = (BALL_SPEED * 1.55) / spd;
+            this.vx *= sc; this.vy *= sc;
+          }
+        }
+      }
+    }
   }
 
   collidesBlock(block) {
@@ -738,7 +908,9 @@ class Ball {
   }
 
   resolveBlockCollision(block, game) {
-    const dmg = game.ballDamage + (game.hasUpgrade('crit_chance') && Math.random() < 0.15 ? game.ballDamage * 2 : 0);
+    const voidBonus = (game.hasRelic && game.hasRelic('void_compass') && game.voidCompassReady) ? 1 : 0;
+    if (voidBonus) game.voidCompassReady = false;
+    const dmg = game.ballDamage + voidBonus + (game.hasUpgrade('crit_chance') && Math.random() < 0.15 ? game.ballDamage * 2 : 0);
 
     // Chain reaction upgrade: first hit per turn causes extra explosion
     if (game.hasUpgrade('explode_hit') && game.firstHitThisTurn) {
@@ -941,6 +1113,14 @@ class Game {
     this.inputX = W / 2;
     this.inputY = 0;
 
+    // V4B: Anomalies, portals, relics
+    this.blackHoles = [];
+    this.portals = [];
+    this.relics = [];
+    this.bossDefeatedThisTurn = false;
+    this.emergencyShieldUsed = false;
+    this.voidCompassReady = false;
+
     // Spawn first stage
     this.spawnStageBlocks();
 
@@ -967,8 +1147,14 @@ class Game {
     return this.runUpgrades.includes(id);
   }
 
+  hasRelic(id) {
+    return this.relics ? this.relics.includes(id) : false;
+  }
+
   earnShards(n) {
-    const earned = Math.floor(n * this.shardMultiplier);
+    let mult = this.shardMultiplier;
+    if (this.hasRelic('greedy_core')) mult *= 1.5;
+    const earned = Math.floor(n * mult);
     this.shards += earned;
     saveData.totalShards += earned;
     document.getElementById('hud-shards').textContent = this.shards;
@@ -977,7 +1163,8 @@ class Game {
   // ---- Block spawning ----
 
   blockHpForStage(stage) {
-    return Math.ceil(1 + stage * 0.9 + (stage > 5 ? stage * 0.55 : 0));
+    const base = Math.ceil(1 + stage * 0.9 + (stage > 5 ? stage * 0.55 : 0));
+    return this.hasRelic('siege_engine') ? Math.ceil(base * 1.12) : base;
   }
 
   spawnStageBlocks() {
@@ -1010,7 +1197,12 @@ class Game {
       if (type === BlockType.NORMAL && Math.random() < 0.25) continue;
 
       const blockHp = type === BlockType.BOSS ? hp * 4 : hp;
-      this.blocks.push(new Block(col, 0, type, blockHp));
+      const newBlock = new Block(col, 0, type, blockHp);
+      if (type === BlockType.BOSS) {
+        const behaviors = ['shield_core', 'gravity_core', 'summoner_core', 'corrupt_core', 'laser_core'];
+        newBlock.bossType = behaviors[(Math.floor(stage / BOSS_INTERVAL) - 1) % behaviors.length];
+      }
+      this.blocks.push(newBlock);
     }
 
     // Collect columns occupied at row 0
@@ -1037,6 +1229,26 @@ class Game {
       if (freeCols.length > 0) {
         this.markers.push(new Marker(randItem(freeCols), 0, this._pickMarkerType(stage)));
       }
+    }
+
+    // V4B: Spawn black hole (stage 4+, max 1 alive at a time)
+    if (stage >= 4 && this.blackHoles.filter(bh => bh.alive).length < 1 && Math.random() < 0.13) {
+      const col = randInt(1, COLS - 2);
+      const row = randInt(1, 4);
+      const bhX = blockPad + col * (blockW + blockPad) + blockW / 2;
+      const bhY = blockPad + row * (blockH + blockPad) + blockH / 2;
+      this.blackHoles.push(new BlackHole(bhX, bhY));
+    }
+
+    // V4B: Spawn portal pair (stage 6+, max 1 pair alive at a time)
+    if (stage >= 6 && this.portals.filter(p => p.alive).length < 1 && Math.random() < 0.15) {
+      const colA = randInt(0, 2), colB = randInt(4, COLS - 1);
+      const rowA = randInt(1, 3), rowB = randInt(1, 3);
+      const ax = blockPad + colA * (blockW + blockPad) + blockW / 2;
+      const ay = blockPad + rowA * (blockH + blockPad) + blockH / 2;
+      const bx = blockPad + colB * (blockW + blockPad) + blockW / 2;
+      const by = blockPad + rowB * (blockH + blockPad) + blockH / 2;
+      this.portals.push(new PortalPair(ax, ay, bx, by));
     }
   }
 
@@ -1071,6 +1283,21 @@ class Game {
       }
       if (block.row >= WARNING_ROW) hitWarning = true;
     }
+    // V4B: Emergency Shield relic — push back most dangerous block on first warning
+    if (hitWarning && !this.warningActive && !this.emergencyShieldUsed && this.hasRelic('emergency_shield')) {
+      this.emergencyShieldUsed = true;
+      const dangerBlock = this.blocks
+        .filter(b => b.alive && b.row >= WARNING_ROW)
+        .sort((a, b) => b.row - a.row)[0];
+      if (dangerBlock) {
+        const fx = dangerBlock.cx, fy = dangerBlock.cy;
+        dangerBlock.row = Math.max(0, dangerBlock.row - 2);
+        floatingTexts.push(new FloatingText(W / 2, H * 0.5, 'EMERGENCY SHIELD!', '#00ccff'));
+        spawnParticles(fx, fy, '#00ccff', 12, { speed: 3, decay: 0.04 });
+        screenShake(4, 3);
+      }
+    }
+
     this.warningActive = hitWarning;
   }
 
@@ -1092,6 +1319,16 @@ class Game {
     this.electricHitCount = 0;
     this.comboCount = 0;
     this.turn++;
+
+    // V4B: Broken Reactor relic — 1 damage to a random block at start of turn
+    if (this.hasRelic('broken_reactor')) {
+      const aliveBlocks = this.blocks.filter(b => b.alive);
+      if (aliveBlocks.length > 0) {
+        const target = randItem(aliveBlocks);
+        target.hit(1, this);
+        spawnParticles(target.cx, target.cy, '#ff4400', 5, { speed: 2, decay: 0.07, size: 2 });
+      }
+    }
 
     const totalBalls = this.ballCount;
     const piercing = this.hasUpgrade('piercing') ? 3 : 0;
@@ -1148,7 +1385,7 @@ class Game {
     if (this.mysteryProcessing) return; // prevent recursive mystery chains
     this.mysteryProcessing = true;
 
-    const isGood = Math.random() < 0.60;
+    const isGood = Math.random() < (this.hasRelic('greedy_core') ? 0.45 : 0.60);
     const pool = isGood ? MYSTERY_GOOD : MYSTERY_BAD;
     const effect = randItem(pool);
     let label = effect.label;
@@ -1297,9 +1534,10 @@ class Game {
   }
 
   _fireLaserRow(row) {
+    const laserDmg = 1 + (this.hasRelic('storm_lens') ? 1 : 0);
     for (const b of this.blocks) {
       if (b.alive && b.row === row) {
-        b.hit(1, this);
+        b.hit(laserDmg, this);
         spawnParticles(b.cx, b.cy, '#ff44cc', 4, { speed: 2, decay: 0.07 });
       }
     }
@@ -1307,9 +1545,10 @@ class Game {
   }
 
   _fireLaserCol(col) {
+    const laserDmg = 1 + (this.hasRelic('storm_lens') ? 1 : 0);
     for (const b of this.blocks) {
       if (b.alive && b.col === col) {
-        b.hit(1, this);
+        b.hit(laserDmg, this);
         spawnParticles(b.cx, b.cy, '#00ccff', 4, { speed: 2, decay: 0.07 });
       }
     }
@@ -1366,6 +1605,7 @@ class Game {
   // ---- V4A: Combo system ----
 
   onBlockDestroyed(block) {
+    if (block.type === BlockType.BOSS) this.bossDefeatedThisTurn = true;
     this.comboCount++;
     const count = this.comboCount;
     let label = null, color = '#ffee00', shardBonus = 0;
@@ -1405,11 +1645,15 @@ class Game {
 
   applyFireEffect(col, row, cx, cy) {
     const areaDmg = 1 + (this.hasUpgrade('burn_impact') ? 1 : 0);
+    const useCrown = this.hasRelic('fire_crown');
     for (const b of this.blocks) {
       if (!b.alive) continue;
       if (b.col === col && b.row === row) continue;
-      if (Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1) {
+      const dist = Math.max(Math.abs(b.col - col), Math.abs(b.row - row));
+      if (dist <= 1) {
         b.hit(areaDmg, this);
+      } else if (dist === 2 && useCrown) {
+        b.hit(1, this);
       }
     }
     spawnParticles(cx, cy, '#ff6600', 8, { speed: 3.5, decay: 0.045, size: 3, gravity: -0.06 });
@@ -1453,6 +1697,100 @@ class Game {
     spawnParticles(cx, cy, '#6644ff', 6, { speed: 2.5, decay: 0.08, size: 2.5 });
   }
 
+  // ---- V4B: Boss behavior ----
+
+  performBossAction(boss) {
+    switch (boss.bossType) {
+      case 'shield_core': {
+        const candidates = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS && !b.shieldActive)
+          .sort((a, b) => (Math.abs(a.col - boss.col) + Math.abs(a.row - boss.row)) -
+                          (Math.abs(b.col - boss.col) + Math.abs(b.row - boss.row)))
+          .slice(0, 2);
+        for (const nb of candidates) {
+          nb.shieldActive = true;
+          spawnParticles(nb.cx, nb.cy, '#00ccff', 6, { speed: 2, decay: 0.06 });
+        }
+        if (candidates.length > 0) floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'SHIELD GRANTED!', '#00ccff'));
+        break;
+      }
+      case 'gravity_core': {
+        const existBH = this.blackHoles.find(bh => bh.alive);
+        if (existBH) {
+          existBH.strength = Math.min(existBH.strength + 0.1, 0.6);
+          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'GRAVITY+!', '#8800ff'));
+        } else {
+          this.blackHoles.push(new BlackHole(boss.cx, boss.cy + (blockH + blockPad) * 1.5));
+          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'VOID OPENED!', '#8800ff'));
+        }
+        spawnParticles(boss.cx, boss.cy, '#8800ff', 10, { speed: 3, decay: 0.05 });
+        break;
+      }
+      case 'summoner_core': {
+        const taken = this.blocks.filter(b => b.alive && b.row === 0).map(b => b.col);
+        const free = Array.from({ length: COLS }, (_, i) => i).filter(c => !taken.includes(c));
+        if (free.length > 0) {
+          const summonHp = Math.ceil(this.blockHpForStage(this.stage) * 0.6);
+          this.blocks.push(new Block(randItem(free), 0, BlockType.NORMAL, summonHp));
+          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'SUMMONED!', '#ff8800'));
+          spawnParticles(boss.cx, boss.cy, '#ff8800', 8, { speed: 2.5, decay: 0.05 });
+        }
+        break;
+      }
+      case 'corrupt_core': {
+        const targets = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS)
+          .sort(() => Math.random() - 0.5).slice(0, 3);
+        for (const t of targets) { t.hp += 3; t.maxHp = Math.max(t.maxHp, t.hp); t.hitFlash = 4; }
+        if (targets.length > 0) floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'CORRUPTED!', '#ff0066'));
+        spawnParticles(boss.cx, boss.cy, '#ff0066', 8, { speed: 2.5, decay: 0.05 });
+        break;
+      }
+      case 'laser_core':
+        this._fireLaserRow(boss.row);
+        laserBeams.push({ x1: 0, y1: boss.cy, x2: W, y2: boss.cy, color: '#ff0044', life: 10 });
+        floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'PULSE!', '#ff0044'));
+        break;
+    }
+    boss.hitFlash = 6;
+  }
+
+  // ---- V4B: Relic choice ----
+
+  showRelicChoice() {
+    this.phase = GamePhase.UPGRADE;
+    const titleEl = document.querySelector('#screen-upgrade-choice .screen-title');
+    if (titleEl) titleEl.textContent = 'CHOOSE RELIC';
+
+    const available = RELICS.filter(r => !this.hasRelic(r.id));
+    const picks = available.sort(() => Math.random() - 0.5).slice(0, 3);
+
+    const container = document.getElementById('upgrade-cards');
+    container.innerHTML = '';
+    for (const relic of picks) {
+      const card = document.createElement('div');
+      card.className = 'upg-card';
+      card.innerHTML = `
+        <div class="upg-card-icon">${relic.icon}</div>
+        <div class="upg-card-text">
+          <div class="upg-card-name" style="color:#ffcc44">${relic.name}</div>
+          <div class="upg-card-desc">${relic.desc}</div>
+        </div>`;
+      card.addEventListener('click', () => this.pickRelic(relic));
+      container.appendChild(card);
+    }
+    Screens.show('upgrade-choice');
+  }
+
+  pickRelic(relic) {
+    this.relics.push(relic.id);
+    if (relic.id === 'siege_engine') { this.ballCount += 2; this.updateHUD(); }
+    const titleEl = document.querySelector('#screen-upgrade-choice .screen-title');
+    if (titleEl) titleEl.textContent = 'CHOOSE UPGRADE';
+    floatingTexts.push(new FloatingText(W / 2, H * 0.5, relic.name + '!', '#ffcc44'));
+    Screens.show('game');
+    this.phase = GamePhase.IDLE;
+    this.updateHUD();
+  }
+
   // ---- Turn end ----
 
   processTurnEnd() {
@@ -1468,6 +1806,21 @@ class Game {
     this.blocks = this.blocks.filter(b => b.alive);
     this.orbs   = this.orbs.filter(o => o.alive);
     this.markers = this.markers.filter(m => m.alive);
+
+    // V4B: Boss action (every 3rd turn while alive)
+    const activeBoss = this.blocks.find(b => b.alive && b.type === BlockType.BOSS);
+    if (activeBoss && this.turn % 3 === 0) this.performBossAction(activeBoss);
+
+    // V4B: Frozen Heart relic (every 4th turn)
+    if (this.hasRelic('frozen_heart') && this.turn % 4 === 0) {
+      const aliveRows = [...new Set(this.blocks.filter(b => b.alive).map(b => b.row))];
+      if (aliveRows.length > 0) {
+        const frozenRow = randItem(aliveRows);
+        this.blocks.filter(b => b.alive && b.row === frozenRow).forEach(b => { b.frozen = true; b.frozenTurns = 1; });
+        floatingTexts.push(new FloatingText(W / 2, H * 0.35, 'ROW FROZEN!', '#00ccff'));
+        spawnParticles(W / 2, H * 0.4, '#00ccff', 10, { speed: 3.5, decay: 0.04, size: 2.5 });
+      }
+    }
 
     // Shard regen upgrade
     if (this.hasUpgrade('regen')) this.earnShards(5);
@@ -1493,6 +1846,19 @@ class Game {
 
     // Shard earn per stage
     this.earnShards(randInt(2, 5) + Math.floor(this.stage / 5));
+
+    // V4B: Descend anomalies; cull those too close to launcher
+    for (const bh of this.blackHoles) bh.descend();
+    for (const pp of this.portals) pp.descend();
+    this.blackHoles = this.blackHoles.filter(bh => bh.alive && bh.y < launcherY - 20);
+    this.portals    = this.portals.filter(pp => pp.alive && pp.ay < launcherY - 20 && pp.by < launcherY - 20);
+
+    // V4B: Boss defeated → relic choice (takes priority over upgrade interval)
+    if (this.bossDefeatedThisTurn) {
+      this.bossDefeatedThisTurn = false;
+      setTimeout(() => this.showRelicChoice(), 600);
+      return;
+    }
 
     // Check upgrade interval
     if (this.stage % UPGRADE_INTERVAL === 1 && this.stage > 1) {
@@ -1652,6 +2018,9 @@ class Game {
     ctx.beginPath(); ctx.moveTo(0, dangerY); ctx.lineTo(W, dangerY); ctx.stroke();
     ctx.setLineDash([]);
 
+    // V4B: Black holes (rendered behind blocks)
+    for (const bh of this.blackHoles) { bh.update(); if (bh.alive) bh.draw(ctx); }
+
     // Blocks
     for (const block of this.blocks) {
       if (block.alive) block.draw(ctx);
@@ -1678,6 +2047,9 @@ class Game {
     // Markers
     for (const marker of this.markers) { marker.draw(ctx); }
 
+    // V4B: Portals
+    for (const pp of this.portals) { pp.update(); if (pp.alive) pp.draw(ctx); }
+
     // Laser beam flashes
     for (const lb of laserBeams) {
       ctx.save();
@@ -1703,6 +2075,21 @@ class Game {
 
     // Floating texts (drawn above particles)
     for (const ft of floatingTexts) { ft.draw(ctx); }
+
+    // V4B: Active relics — small canvas HUD (top-left, semi-transparent)
+    if (this.relics && this.relics.length > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      ctx.font = '8px \'Courier New\'';
+      ctx.fillStyle = '#ffcc44';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      this.relics.slice(0, 5).forEach((id, i) => {
+        const rel = RELICS.find(x => x.id === id);
+        if (rel) ctx.fillText(rel.name, 4, 4 + i * 10);
+      });
+      ctx.restore();
+    }
 
     ctx.restore();
 
