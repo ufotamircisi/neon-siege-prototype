@@ -78,16 +78,21 @@
       </div>
       <canvas id="gameCanvas"></canvas>
       <div id="power-bar">
-        <button class="power-btn" id="btn-lightning" title="Lightning Strike">
-          <span class="pow-icon">⚡</span>
-          <span class="pow-count" id="pow-lightning-count">1</span>
-        </button>
-        <div id="balls-indicator">
-          <span id="balls-count">1</span> <span class="balls-label">BALLS</span>
-        </div>
-        <button class="power-btn" id="btn-bomb" title="Bomb">
+        <button class="power-btn" id="btn-lightning" title="Bomb — clears bottom 3 rows">
           <span class="pow-icon">💣</span>
-          <span class="pow-count" id="pow-bomb-count">1</span>
+          <span class="pow-count" id="pow-lightning-count">3</span>
+        </button>
+        <div id="power-bar-center">
+          <div id="balls-indicator">
+            <span id="balls-count">1</span> <span class="balls-label">BALLS</span>
+          </div>
+          <button class="recall-btn" id="btn-recall" title="Recall all balls and end turn" disabled>
+            ↓ RECALL
+          </button>
+        </div>
+        <button class="power-btn" id="btn-bomb" title="10x Ball Multiplier — one shot">
+          <span class="pow-icon">×10</span>
+          <span class="pow-count" id="pow-bomb-count">3</span>
         </button>
       </div>
     </div>

@@ -333,8 +333,8 @@ html, body {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 12px;
-  width: 52px;
-  height: 52px;
+  width: 62px;
+  height: 62px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -365,11 +365,46 @@ html, body {
   line-height: 1;
 }
 
+#power-bar-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 #balls-indicator {
   text-align: center;
   font-size: 11px;
   letter-spacing: 2px;
   color: var(--text-dim);
+}
+
+.recall-btn {
+  background: rgba(0,245,255,0.08);
+  border: 1px solid rgba(0,245,255,0.25);
+  border-radius: 8px;
+  color: var(--neon-cyan);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.1s, box-shadow 0.1s;
+  min-width: 80px;
+  touch-action: manipulation;
+}
+
+.recall-btn:hover:not(:disabled) {
+  background: rgba(0,245,255,0.18);
+  box-shadow: 0 0 10px rgba(0,245,255,0.35);
+}
+
+.recall-btn:active:not(:disabled) { transform: scale(0.96); }
+
+.recall-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
 }
 
 #balls-count {

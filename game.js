@@ -11,7 +11,7 @@
 
 const COLS = 7;
 const BALL_SPEED = 9;
-const BALL_RADIUS = 7;
+const BALL_RADIUS = 9;
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
 const DANGER_ROW = 14;      // blocks past this row = game over
 const WARNING_ROW = DANGER_ROW - 1; // danger warning one row before game over
@@ -1254,9 +1254,11 @@ class Game {
     // Mystery guard (prevent recursive mystery effects)
     this.mysteryProcessing = false;
 
-    // Powers
-    this.powLightning = 1;
-    this.powBomb = 1;
+    // Powers (V6B)
+    this.powBomb     = 3;   // left button — bomb (bottom 3 rows)
+    this.powMult     = 3;   // right button — 10x ball multiplier
+    this.ballMultActive = false;
+    this.shotId      = 0;   // incremented each shoot(); recall uses this to cancel queued launches
 
     // Game objects
     this.blocks = [];
@@ -1507,6 +1509,8 @@ class Game {
     this.electricHitCount = 0;
     this.comboCount = 0;
     this.turn++;
+    this.shotId++;
+    this.updatePowerBar(); // enable recall button immediately
 
     // V5A: Track shot + reset per-turn laser/electric flags (power flag persists from IDLE)
     saveData.stats.totalShotsFired++;
@@ -1524,7 +1528,15 @@ class Game {
       }
     }
 
-    const totalBalls = this.ballCount;
+    // V6B: 10x multiplier applies to this shot only
+    const isMultShot = this.ballMultActive;
+    let totalBalls = this.ballCount;
+    if (isMultShot) {
+      totalBalls = Math.min(this.ballCount * 10, 300);
+      this.ballMultActive = false;
+      floatingTexts.push(new FloatingText(W / 2, H * 0.4, '×10 SHOT!', '#ffee00'));
+      screenShake(4, 3);
+    }
     const piercing = this.hasUpgrade('piercing') ? 3 : 0;
     const spread = this.hasUpgrade('multishot');
     const lx = this.launcher.x;
@@ -1533,9 +1545,11 @@ class Game {
     const spd = BALL_SPEED;
 
     let launched = 0;
-    this.pendingBalls = totalBalls; // track balls yet to be fired
+    this.pendingBalls = totalBalls;
+    const currentShotId = this.shotId;                        // V6B: recall guard
+    const launchDelay   = isMultShot ? Math.max(8, FIRE_DELAY >> 2) : FIRE_DELAY;
     const launchNext = () => {
-      if (launched >= totalBalls) return;
+      if (launched >= totalBalls || this.shotId !== currentShotId) return; // cancelled by recall
       let a = angle;
       if (spread) a += (launched % 2 === 0 ? 1 : -1) * 0.08 * Math.ceil(launched / 2);
       const vx = Math.cos(a) * spd;
@@ -1548,7 +1562,7 @@ class Game {
       this.balls.push(new Ball(lx, ly, vx, vy, { piercingLeft: piercing, element: ballElement }));
       launched++;
       this.pendingBalls--;
-      if (launched < totalBalls) setTimeout(launchNext, FIRE_DELAY);
+      if (launched < totalBalls) setTimeout(launchNext, launchDelay);
     };
     launchNext();
 
@@ -1765,39 +1779,53 @@ class Game {
 
   // ---- Powers ----
 
-  useLightning() {
-    if (this.phase !== GamePhase.IDLE || this.powLightning <= 0) return;
-    this.powLightning--;
-    this.turnPowerUsed = true; // V5A
-    this.updatePowerBar();
-
-    // Hit 5 random alive blocks
-    const alive = this.blocks.filter(b => b.alive);
-    const targets = alive.sort(() => Math.random() - 0.5).slice(0, 5);
-    for (const b of targets) {
-      b.hit(this.ballDamage * 3, this);
-      spawnParticles(b.cx, b.cy, '#ffee00', 8, { speed: 3, decay: 0.05 });
-    }
-    screenShake(5, 4);
-  }
-
+  // V6B: Bomb — damages the bottom 3 block rows (closest to danger line)
   useBomb() {
     if (this.phase !== GamePhase.IDLE || this.powBomb <= 0) return;
     this.powBomb--;
-    this.turnPowerUsed = true; // V5A
+    this.turnPowerUsed = true;
     this.updatePowerBar();
 
-    // Damage a 3x3 area in the center
-    const centerCol = Math.floor(COLS / 2);
-    const centerRow = Math.floor(this.blocks.reduce((a, b) => b.alive ? Math.min(a, b.row) : a, 999) + 2);
+    const aliveRows = [...new Set(this.blocks.filter(b => b.alive).map(b => b.row))].sort((a, b) => b - a);
+    const targetRows = new Set(aliveRows.slice(0, 3));
+    let hit = 0;
     for (const b of this.blocks) {
-      if (!b.alive) continue;
-      if (Math.abs(b.col - centerCol) <= 1 && Math.abs(b.row - centerRow) <= 1) {
-        b.hit(this.ballDamage * 5, this);
-        spawnParticles(b.cx, b.cy, '#ff6600', 10, { speed: 4, decay: 0.04 });
+      if (!b.alive || !targetRows.has(b.row)) continue;
+      b.hit(this.ballDamage * 8, this);
+      spawnParticles(b.cx, b.cy, '#ff6600', 10, { speed: 4.5, decay: 0.04 });
+      spawnParticles(b.cx, b.cy, '#ffee00', 5,  { speed: 6,   decay: 0.035, size: 3 });
+      hit++;
+    }
+    if (hit > 0) {
+      floatingTexts.push(new FloatingText(W / 2, H * 0.43, '💣 BOMB!', '#ff6600'));
+      screenShake(12, 7);
+    }
+  }
+
+  // V6B: 10x Ball Multiplier — next shot fires 10× current ball count (one shot only)
+  useMult() {
+    if (this.phase !== GamePhase.IDLE || this.powMult <= 0 || this.ballMultActive) return;
+    this.powMult--;
+    this.turnPowerUsed = true;
+    this.ballMultActive = true;
+    this.updatePowerBar();
+    floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
+  }
+
+  // V6B: Recall — instantly deactivates all flying balls and ends the turn
+  recallBalls() {
+    if (this.phase !== GamePhase.SHOOTING) return;
+    this.shotId++;              // cancels any queued launchNext timeouts
+    this.pendingBalls = 0;     // forces turn-end detection in update()
+    if (this.firstReturnX === null) this.firstReturnX = this.launcher.x;
+    for (const b of this.balls) {
+      if (b.active) {
+        spawnParticles(b.x, b.y, '#00f5ff', 4, { speed: 2.5, decay: 0.08 });
+        b.active = false;
       }
     }
-    screenShake(8, 6);
+    floatingTexts.push(new FloatingText(W / 2, H * 0.5, '↓ RECALLED', '#00ccff'));
+    this.updatePowerBar();
   }
 
   // ---- Explosions ----
@@ -2110,7 +2138,8 @@ class Game {
       const milestoneNum = Math.max(1, Math.floor((this.stage - 1) / BOSS_INTERVAL));
       const bonusShards  = 15 + milestoneNum * 10;
       this.earnShards(bonusShards);
-      this.powLightning  = Math.min(this.powLightning + 1, 3);
+      this.powBomb = Math.min(this.powBomb + 1, 6);
+      this.powMult = Math.min(this.powMult + 1, 6);
       this.updatePowerBar();
       floatingTexts.push(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
       floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+SHARDS & POWER RESTORED', '#00ff88'));
@@ -2204,10 +2233,13 @@ class Game {
   }
 
   updatePowerBar() {
-    document.getElementById('pow-lightning-count').textContent = this.powLightning;
-    document.getElementById('pow-bomb-count').textContent = this.powBomb;
-    document.getElementById('btn-lightning').disabled = (this.powLightning <= 0 || this.phase !== GamePhase.IDLE);
-    document.getElementById('btn-bomb').disabled = (this.powBomb <= 0 || this.phase !== GamePhase.IDLE);
+    // V6B: left = bomb, right = 10x multiplier
+    document.getElementById('pow-lightning-count').textContent = this.powBomb;
+    document.getElementById('pow-bomb-count').textContent      = this.ballMultActive ? '✓' : this.powMult;
+    document.getElementById('btn-lightning').disabled = (this.powBomb <= 0 || this.phase !== GamePhase.IDLE);
+    document.getElementById('btn-bomb').disabled      = (this.powMult <= 0 || this.phase !== GamePhase.IDLE || this.ballMultActive);
+    const recallBtn = document.getElementById('btn-recall');
+    if (recallBtn) recallBtn.disabled = (this.phase !== GamePhase.SHOOTING);
   }
 
   // ---- Update loop ----
@@ -2698,12 +2730,17 @@ document.getElementById('btn-menu-go').addEventListener('click', () => {
   Screens.show('menu');
 });
 
+// V6B: left = Bomb, right = 10x Multiplier, center = Recall
 document.getElementById('btn-lightning').addEventListener('click', () => {
-  if (game) { game.useLightning(); game.updatePowerBar(); }
+  if (game) game.useBomb();
 });
 
 document.getElementById('btn-bomb').addEventListener('click', () => {
-  if (game) { game.useBomb(); game.updatePowerBar(); }
+  if (game) game.useMult();
+});
+
+document.getElementById('btn-recall').addEventListener('click', () => {
+  if (game) game.recallBalls();
 });
 
 // ============================================================
