@@ -86,6 +86,59 @@ const RELICS = [
 ];
 
 // ============================================================
+// V5A: STATS & ACHIEVEMENTS
+// ============================================================
+
+const DEFAULT_STATS = {
+  totalBlocksDestroyed:        0,
+  totalBossesDefeated:         0,
+  totalShotsFired:             0,
+  totalShardsEarned:           0,
+  totalMysteryBlocksDestroyed: 0,
+  highestCombo:                0,
+  highestBallCount:            0,
+  laserTriggers:               0,
+  portalHits:                  0,
+  gravityHits:                 0,
+  closeCallRecoveries:         0,
+  harmfulMysterySurvived:      0,
+  tripledBlockDestroyed:       0,
+};
+
+const ACHIEVEMENTS = [
+  // First Steps
+  { id: 'first_shot',    title: 'First Shot',         desc: 'Fire your first shot.',                    cat: 'first',    reward: 5,   stat: 'totalShotsFired',             target: 1    },
+  { id: 'first_break',   title: 'First Break',        desc: 'Destroy your first block.',                cat: 'first',    reward: 5,   stat: 'totalBlocksDestroyed',        target: 1    },
+  { id: 'first_upgrade', title: 'First Upgrade',      desc: 'Choose your first upgrade card.',          cat: 'first',    reward: 5,   stat: null,                          target: null },
+  { id: 'first_boss',    title: 'First Boss',         desc: 'Defeat your first boss core.',             cat: 'first',    reward: 20,  stat: 'totalBossesDefeated',         target: 1    },
+  // Skill
+  { id: 'combo_5',       title: 'Combo Starter',      desc: 'Reach x5 combo in one turn.',              cat: 'skill',    reward: 10,  stat: null,                          target: null },
+  { id: 'combo_10',      title: 'Neon Frenzy',        desc: 'Reach x10 combo in one turn.',             cat: 'skill',    reward: 20,  stat: null,                          target: null },
+  { id: 'combo_20',      title: 'Siege Master',       desc: 'Reach x20 combo in one turn.',             cat: 'skill',    reward: 50,  stat: null,                          target: null },
+  { id: 'ball_storm',    title: 'Ball Storm',         desc: 'Reach 10 balls in one run.',               cat: 'skill',    reward: 20,  stat: null,                          target: null },
+  { id: 'swarm_cmd',     title: 'Swarm Commander',    desc: 'Reach 25 balls in one run.',               cat: 'skill',    reward: 50,  stat: null,                          target: null },
+  { id: 'laser_artist',  title: 'Laser Artist',       desc: 'Trigger 10 laser markers.',                cat: 'skill',    reward: 15,  stat: 'laserTriggers',               target: 10   },
+  { id: 'portal_shot',   title: 'Portal Shot',        desc: 'Hit a block after a portal teleport.',     cat: 'skill',    reward: 15,  stat: 'portalHits',                  target: 1    },
+  { id: 'gravity_trick', title: 'Gravity Trick',      desc: 'Hit a block under black hole influence.',  cat: 'skill',    reward: 15,  stat: 'gravityHits',                 target: 1    },
+  // Survival
+  { id: 'close_call',    title: 'Close Call',         desc: 'Recover after blocks enter warning row.',  cat: 'survival', reward: 15,  stat: 'closeCallRecoveries',         target: 1    },
+  { id: 'last_line',     title: 'Last Line Hero',     desc: 'Destroy a block in the warning row.',      cat: 'survival', reward: 25,  stat: null,                          target: null },
+  { id: 'boss_survivor', title: 'Boss Survivor',      desc: 'Defeat a boss while blocks near danger.',  cat: 'survival', reward: 30,  stat: null,                          target: null },
+  // Long-Term
+  { id: 'crusher_1',     title: 'Block Crusher I',    desc: 'Destroy 100 blocks total.',                cat: 'longterm', reward: 15,  stat: 'totalBlocksDestroyed',        target: 100  },
+  { id: 'crusher_2',     title: 'Block Crusher II',   desc: 'Destroy 1000 blocks total.',               cat: 'longterm', reward: 50,  stat: 'totalBlocksDestroyed',        target: 1000 },
+  { id: 'boss_hunter_1', title: 'Boss Hunter I',      desc: 'Defeat 5 bosses total.',                   cat: 'longterm', reward: 20,  stat: 'totalBossesDefeated',         target: 5    },
+  { id: 'boss_hunter_2', title: 'Boss Hunter II',     desc: 'Defeat 25 bosses total.',                  cat: 'longterm', reward: 75,  stat: 'totalBossesDefeated',         target: 25   },
+  { id: 'shard_1',       title: 'Shard Collector I',  desc: 'Earn 1000 total shards.',                  cat: 'longterm', reward: 0,   stat: 'totalShardsEarned',           target: 1000 },
+  { id: 'shard_2',       title: 'Shard Collector II', desc: 'Earn 10000 total shards.',                 cat: 'longterm', reward: 0,   stat: 'totalShardsEarned',           target: 10000},
+  // Secret
+  { id: 'risk_taker',    title: 'Risk Taker',         desc: 'Destroy 10 mystery blocks.',               cat: 'secret',   reward: 25,  stat: 'totalMysteryBlocksDestroyed', target: 10,  hidden: true },
+  { id: 'cursed_luck',   title: 'Cursed Luck',        desc: 'Survive a harmful mystery effect.',        cat: 'secret',   reward: 25,  stat: 'harmfulMysterySurvived',      target: 1,   hidden: true },
+  { id: 'overloaded',    title: 'Overloaded',         desc: 'Destroy a block tripled by mystery.',      cat: 'secret',   reward: 30,  stat: 'tripledBlockDestroyed',       target: 1,   hidden: true },
+  { id: 'chain_react',   title: 'Chain Reaction',     desc: 'Use power, laser, and electric in one turn.', cat: 'secret', reward: 40, stat: null,                        target: null, hidden: true },
+];
+
+// ============================================================
 // SAVE DATA
 // ============================================================
 
@@ -93,9 +146,20 @@ const Save = {
   load() {
     try {
       const raw = localStorage.getItem('neonSiegeSave');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (!d.stats) {
+          d.stats = { ...DEFAULT_STATS };
+        } else {
+          for (const k of Object.keys(DEFAULT_STATS)) {
+            if (!(k in d.stats)) d.stats[k] = 0;
+          }
+        }
+        if (!d.achievements) d.achievements = {};
+        return d;
+      }
     } catch(e) {}
-    return { bestStage: 0, totalShards: 0, permLevels: {} };
+    return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {} };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -103,6 +167,79 @@ const Save = {
 };
 
 let saveData = Save.load();
+
+// ============================================================
+// V5A: ACHIEVEMENT TOAST
+// ============================================================
+
+let _achQueue  = [];
+let _achEl     = null;
+let _achBusy   = false;
+
+function _getAchEl() {
+  if (!_achEl) {
+    _achEl = document.createElement('div');
+    _achEl.style.cssText = [
+      'position:fixed', 'top:68px', 'right:-320px', 'z-index:200',
+      'background:rgba(6,2,20,0.96)', 'border:1px solid #ffcc44',
+      'border-radius:12px', 'padding:10px 14px', 'min-width:200px', 'max-width:270px',
+      'box-shadow:0 0 28px rgba(255,200,0,0.25)', 'transition:right 0.38s ease',
+      "font-family:'Courier New',monospace", 'pointer-events:none',
+    ].join(';');
+    document.body.appendChild(_achEl);
+  }
+  return _achEl;
+}
+
+function _showNextAch() {
+  if (_achBusy || _achQueue.length === 0) return;
+  _achBusy = true;
+  const ach = _achQueue.shift();
+  const el  = _getAchEl();
+  el.innerHTML =
+    '<div style="font-size:9px;letter-spacing:2px;color:#ffcc44;margin-bottom:3px">ACHIEVEMENT UNLOCKED</div>' +
+    '<div style="font-size:13px;font-weight:bold;color:#fff;letter-spacing:1px">' + ach.title + '</div>' +
+    '<div style="font-size:10px;color:#9090bb;margin-top:2px">' + ach.desc + '</div>' +
+    (ach.reward > 0
+      ? '<div style="font-size:11px;color:#a855f7;margin-top:5px">+' + ach.reward + ' ◈ SHARDS</div>'
+      : '');
+  setTimeout(() => { el.style.right = '10px'; }, 30);
+  setTimeout(() => {
+    el.style.right = '-320px';
+    setTimeout(() => { _achBusy = false; _showNextAch(); }, 420);
+  }, 3600);
+}
+
+// ============================================================
+// V5A: ACHIEVEMENTS SYSTEM
+// ============================================================
+
+const Achievements = {
+  isUnlocked(id) {
+    return !!(saveData.achievements && saveData.achievements[id]);
+  },
+
+  unlock(id) {
+    if (this.isUnlocked(id)) return;
+    const ach = ACHIEVEMENTS.find(a => a.id === id);
+    if (!ach) return;
+    saveData.achievements[id] = true;
+    if (ach.reward > 0) {
+      saveData.totalShards += ach.reward;
+      Save.save(saveData);
+    }
+    _achQueue.push(ach);
+    _showNextAch();
+  },
+
+  checkStat(statKey, value) {
+    for (const ach of ACHIEVEMENTS) {
+      if (ach.stat === statKey && ach.target !== null && !this.isUnlocked(ach.id)) {
+        if (value >= ach.target) this.unlock(ach.id);
+      }
+    }
+  },
+};
 
 // ============================================================
 // SCREEN MANAGER
@@ -299,6 +436,7 @@ class Block {
     this.frozen = false;
     this.frozenTurns = 0;
     this.bossType = null;
+    this.wasTripled = false;
   }
 
   get x() { return blockPad + this.col * (blockW + blockPad); }
@@ -797,6 +935,7 @@ class Ball {
     this.piercingLeft = opts.piercingLeft || 0;
     this.element = opts.element || null;
     this.portalCooldown = 0;
+    this.portalJustUsed = false;
     this.trail = [];
   }
 
@@ -859,6 +998,7 @@ class Ball {
           if (dxa * dxa + dya * dya < r * r) {
             this.x = pp.bx; this.y = pp.by;
             this.portalCooldown = 22;
+            this.portalJustUsed = true;
             spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
             spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
             if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
@@ -868,6 +1008,7 @@ class Ball {
           if (dxb * dxb + dyb * dyb < r * r) {
             this.x = pp.ax; this.y = pp.ay;
             this.portalCooldown = 22;
+            this.portalJustUsed = true;
             spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
             spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
             if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
@@ -911,6 +1052,22 @@ class Ball {
     const voidBonus = (game.hasRelic && game.hasRelic('void_compass') && game.voidCompassReady) ? 1 : 0;
     if (voidBonus) game.voidCompassReady = false;
     const dmg = game.ballDamage + voidBonus + (game.hasUpgrade('crit_chance') && Math.random() < 0.15 ? game.ballDamage * 2 : 0);
+
+    // V5A: Portal hit stat
+    if (this.portalJustUsed) {
+      this.portalJustUsed = false;
+      saveData.stats.portalHits++;
+      Achievements.checkStat('portalHits', saveData.stats.portalHits);
+    }
+    // V5A: Gravity hit stat (ball inside a black hole's influence zone)
+    if (game.blackHoles && game.blackHoles.some(bh => {
+      if (!bh.alive) return false;
+      const dx = this.x - bh.x, dy = this.y - bh.y;
+      return dx * dx + dy * dy < bh.radius * bh.radius;
+    })) {
+      saveData.stats.gravityHits++;
+      Achievements.checkStat('gravityHits', saveData.stats.gravityHits);
+    }
 
     // Chain reaction upgrade: first hit per turn causes extra explosion
     if (game.hasUpgrade('explode_hit') && game.firstHitThisTurn) {
@@ -1121,6 +1278,11 @@ class Game {
     this.emergencyShieldUsed = false;
     this.voidCompassReady = false;
 
+    // V5A: Per-turn effect flags (chain_react achievement)
+    this.turnPowerUsed    = false;
+    this.turnLaserUsed    = false;
+    this.turnElectricUsed = false;
+
     // Spawn first stage
     this.spawnStageBlocks();
 
@@ -1157,6 +1319,9 @@ class Game {
     const earned = Math.floor(n * mult);
     this.shards += earned;
     saveData.totalShards += earned;
+    // V5A: Cumulative shards earned (wallet-independent)
+    saveData.stats.totalShardsEarned += earned;
+    Achievements.checkStat('totalShardsEarned', saveData.stats.totalShardsEarned);
     document.getElementById('hud-shards').textContent = this.shards;
   }
 
@@ -1298,6 +1463,11 @@ class Game {
       }
     }
 
+    // V5A: Close call recovery — blocks were in warning row but player cleared them
+    if (this.warningActive && !hitWarning) {
+      saveData.stats.closeCallRecoveries++;
+      Achievements.checkStat('closeCallRecoveries', saveData.stats.closeCallRecoveries);
+    }
     this.warningActive = hitWarning;
   }
 
@@ -1319,6 +1489,12 @@ class Game {
     this.electricHitCount = 0;
     this.comboCount = 0;
     this.turn++;
+
+    // V5A: Track shot + reset per-turn laser/electric flags (power flag persists from IDLE)
+    saveData.stats.totalShotsFired++;
+    Achievements.checkStat('totalShotsFired', saveData.stats.totalShotsFired);
+    this.turnLaserUsed    = false;
+    this.turnElectricUsed = false;
 
     // V4B: Broken Reactor relic — 1 damage to a random block at start of turn
     if (this.hasRelic('broken_reactor')) {
@@ -1387,6 +1563,11 @@ class Game {
 
     const isGood = Math.random() < (this.hasRelic('greedy_core') ? 0.45 : 0.60);
     const pool = isGood ? MYSTERY_GOOD : MYSTERY_BAD;
+    // V5A: Harmful mystery stat
+    if (!isGood) {
+      saveData.stats.harmfulMysterySurvived++;
+      Achievements.checkStat('harmfulMysterySurvived', saveData.stats.harmfulMysterySurvived);
+    }
     const effect = randItem(pool);
     let label = effect.label;
     const color = isGood ? '#00ff88' : '#ff6600';
@@ -1449,6 +1630,7 @@ class Game {
         const big = alive().sort((a, b) => b.hp - a.hp)[0];
         if (big) {
           big.hp *= 3; big.maxHp = Math.max(big.maxHp, big.hp); big.hitFlash = 8;
+          big.wasTripled = true; // V5A: tracked for overloaded achievement
           spawnParticles(big.cx, big.cy, '#ff0044', 12, { speed: 3, decay: 0.04 });
         }
         break;
@@ -1517,11 +1699,15 @@ class Game {
         this._fireLaserRow(marker.row);
         laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 10 });
         floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+        saveData.stats.laserTriggers++;
+        Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         break;
       case 'laser_v':
         this._fireLaserCol(marker.col);
         laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 10 });
         floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+        saveData.stats.laserTriggers++;
+        Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         break;
       case 'laser_cross':
         this._fireLaserRow(marker.row);
@@ -1529,11 +1715,14 @@ class Game {
         laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
         laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 10 });
         floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+        saveData.stats.laserTriggers++;
+        Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         break;
     }
   }
 
   _fireLaserRow(row) {
+    this.turnLaserUsed = true; // V5A
     const laserDmg = 1 + (this.hasRelic('storm_lens') ? 1 : 0);
     for (const b of this.blocks) {
       if (b.alive && b.row === row) {
@@ -1545,6 +1734,7 @@ class Game {
   }
 
   _fireLaserCol(col) {
+    this.turnLaserUsed = true; // V5A
     const laserDmg = 1 + (this.hasRelic('storm_lens') ? 1 : 0);
     for (const b of this.blocks) {
       if (b.alive && b.col === col) {
@@ -1560,6 +1750,7 @@ class Game {
   useLightning() {
     if (this.phase !== GamePhase.IDLE || this.powLightning <= 0) return;
     this.powLightning--;
+    this.turnPowerUsed = true; // V5A
     this.updatePowerBar();
 
     // Hit 5 random alive blocks
@@ -1575,6 +1766,7 @@ class Game {
   useBomb() {
     if (this.phase !== GamePhase.IDLE || this.powBomb <= 0) return;
     this.powBomb--;
+    this.turnPowerUsed = true; // V5A
     this.updatePowerBar();
 
     // Damage a 3x3 area in the center
@@ -1608,6 +1800,32 @@ class Game {
     if (block.type === BlockType.BOSS) this.bossDefeatedThisTurn = true;
     this.comboCount++;
     const count = this.comboCount;
+
+    // V5A: Block destroyed stats
+    saveData.stats.totalBlocksDestroyed++;
+    Achievements.checkStat('totalBlocksDestroyed', saveData.stats.totalBlocksDestroyed);
+
+    if (block.type === BlockType.BOSS) {
+      saveData.stats.totalBossesDefeated++;
+      Achievements.checkStat('totalBossesDefeated', saveData.stats.totalBossesDefeated);
+      if (this.warningActive) Achievements.unlock('boss_survivor');
+    }
+    if (block.type === BlockType.MYSTERY) {
+      saveData.stats.totalMysteryBlocksDestroyed++;
+      Achievements.checkStat('totalMysteryBlocksDestroyed', saveData.stats.totalMysteryBlocksDestroyed);
+    }
+    if (block.wasTripled) {
+      saveData.stats.tripledBlockDestroyed++;
+      Achievements.checkStat('tripledBlockDestroyed', saveData.stats.tripledBlockDestroyed);
+    }
+    if (block.row >= WARNING_ROW) Achievements.unlock('last_line');
+
+    // V5A: Combo stat + achievements
+    if (count > saveData.stats.highestCombo) saveData.stats.highestCombo = count;
+    if (count === 5)  Achievements.unlock('combo_5');
+    if (count === 10) Achievements.unlock('combo_10');
+    if (count === 20) Achievements.unlock('combo_20');
+
     let label = null, color = '#ffee00', shardBonus = 0;
     if (count === 2)  { label = 'x2 Combo';        color = '#ffee00'; shardBonus = 1; }
     if (count === 5)  { label = 'x5 Neon Combo';    color = '#ff88ff'; shardBonus = 2; }
@@ -1682,6 +1900,7 @@ class Game {
   }
 
   applyElectricEffect(col, row, cx, cy) {
+    this.turnElectricUsed = true; // V5A
     const maxJumps = this.hasUpgrade('overcharge') ? 3 : 2;
     const candidates = this.blocks.filter(b =>
       b.alive && !(b.col === col && b.row === row) &&
@@ -1822,6 +2041,15 @@ class Game {
       }
     }
 
+    // V5A: Chain Reaction achievement — power + laser + electric all in same turn
+    if (this.turnPowerUsed && this.turnLaserUsed && this.turnElectricUsed) {
+      Achievements.unlock('chain_react');
+    }
+    this.turnPowerUsed    = false;
+    this.turnLaserUsed    = false;
+    this.turnElectricUsed = false;
+    Save.save(saveData); // persist stats each turn
+
     // Shard regen upgrade
     if (this.hasUpgrade('regen')) this.earnShards(5);
 
@@ -1906,6 +2134,7 @@ class Game {
       this.runUpgrades.push(upg.id);
       if (upg.id === 'dmg_plus') this.ballDamage += 1;
     }
+    Achievements.unlock('first_upgrade'); // V5A
     Screens.show('game');
     this.phase = GamePhase.IDLE;
     this.updateHUD();
@@ -1935,6 +2164,12 @@ class Game {
     document.getElementById('hud-score').textContent = this.score;
     document.getElementById('hud-shards').textContent = this.shards;
     document.getElementById('balls-count').textContent = this.ballCount;
+    // V5A: Track highest ball count across all time
+    if (this.ballCount > saveData.stats.highestBallCount) {
+      saveData.stats.highestBallCount = this.ballCount;
+      if (this.ballCount >= 10) Achievements.unlock('ball_storm');
+      if (this.ballCount >= 25) Achievements.unlock('swarm_cmd');
+    }
   }
 
   updatePowerBar() {
