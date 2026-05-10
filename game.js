@@ -64,6 +64,13 @@ const RUN_UPGRADES = [
   { id: 'magnet',       icon: '⭐', name: 'MAGNET FIELD',       desc: 'Collect crystals automatically without hitting.' },
   { id: 'multishot',    icon: '🌀', name: 'MULTISHOT',          desc: 'Launch balls in a spread fan pattern.' },
   { id: 'regen',        icon: '💜', name: 'SHARD PULSE',        desc: 'Earn 5 bonus shards at end of each turn.' },
+  // V4A: Element upgrades
+  { id: 'fire_core',     icon: '🔥', name: 'FIRE CORE',         desc: 'Every 5th launched ball is a fire ball — area damage on hit.', minStage: 5 },
+  { id: 'ice_echo',      icon: '❄',  name: 'ICE ECHO',          desc: 'First hit each turn freezes the target block for 1 turn.', minStage: 5 },
+  { id: 'elec_chain',    icon: '⚡', name: 'ELECTRIC CHAIN',    desc: 'Every 4th hit arcs electricity to up to 2 nearby blocks.', minStage: 5 },
+  { id: 'burn_impact',   icon: '💢', name: 'BURNING IMPACT',    desc: 'Fire explosions deal +1 bonus area damage.', minStage: 8 },
+  { id: 'frost_barrier', icon: '🧊', name: 'FROST BARRIER',     desc: 'Frozen blocks have 40% chance to freeze an adjacent block.', minStage: 8 },
+  { id: 'overcharge',    icon: '🌩', name: 'OVERCHARGE',        desc: 'Electric chain jumps one extra time.', minStage: 8 },
 ];
 
 // ============================================================
@@ -277,6 +284,8 @@ class Block {
     this.shieldActive = (type === BlockType.SHIELD);
     this.hitFlash = 0; // frames of white flash
     this.alive = true;
+    this.frozen = false;
+    this.frozenTurns = 0;
   }
 
   get x() { return blockPad + this.col * (blockW + blockPad); }
@@ -304,6 +313,7 @@ class Block {
   }
 
   onDestroy(game) {
+    game.onBlockDestroyed(this);
     const colors = BLOCK_COLORS[this.type];
     spawnExplosionParticles(this.cx, this.cy, colors.glow);
 
@@ -369,6 +379,35 @@ class Block {
       ctx.strokeStyle = 'rgba(0,200,255,0.5)';
       roundRect(ctx, x - 3, y - 3, blockW + 6, blockH + 6, 9);
       ctx.stroke();
+    }
+
+    // Frozen overlay
+    if (this.frozen) {
+      ctx.save();
+      ctx.shadowColor = '#00ccff';
+      ctx.shadowBlur = 12;
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = '#00ccff';
+      if (this.type === BlockType.TRIANGLE) {
+        ctx.beginPath(); ctx.moveTo(x+blockW/2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
+      } else if (this.type === BlockType.INV_TRI) {
+        ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW/2,y+blockH-2); ctx.closePath();
+      } else {
+        roundRect(ctx, x, y, blockW, blockH, 6);
+      }
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(0,200,255,0.75)';
+      ctx.lineWidth = 1.5;
+      if (this.type === BlockType.TRIANGLE) {
+        ctx.beginPath(); ctx.moveTo(x+blockW/2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
+      } else if (this.type === BlockType.INV_TRI) {
+        ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW/2,y+blockH-2); ctx.closePath();
+      } else {
+        roundRect(ctx, x, y, blockW, blockH, 6);
+      }
+      ctx.stroke();
+      ctx.restore();
     }
 
     ctx.restore();
@@ -455,6 +494,38 @@ class FloatingText {
 }
 
 let floatingTexts = [];
+
+// ============================================================
+// COMBO TEXT  (large center-screen combo announcements)
+// ============================================================
+
+class ComboText {
+  constructor(x, y, text, color) {
+    this.x = x; this.y = y;
+    this.text = text;
+    this.color = color;
+    this.life = 1.0;
+    this.vy = -1.0;
+  }
+  update() {
+    this.y += this.vy;
+    this.vy *= 0.96;
+    this.life -= 0.016;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, this.life);
+    ctx.fillStyle = this.color;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 18;
+    ctx.font = 'bold 20px \'Courier New\'';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.restore();
+  }
+  get dead() { return this.life <= 0; }
+}
 
 // ============================================================
 // BALL ORB  (collectible +1 ball pickup)
@@ -606,6 +677,7 @@ class Ball {
     this.vx = vx; this.vy = vy;
     this.active = true;
     this.piercingLeft = opts.piercingLeft || 0;
+    this.element = opts.element || null;
     this.trail = [];
   }
 
@@ -674,7 +746,8 @@ class Ball {
       game.explodeNear(block.col, block.row, 1);
     }
 
-    block.hit(Math.max(1, Math.round(dmg)), game);
+    const destroyed = block.hit(Math.max(1, Math.round(dmg)), game);
+    game.applyElementHit(this, block, destroyed);
 
     // Piercing: skip bounce for first N bounces
     if (this.piercingLeft > 0) {
@@ -703,6 +776,10 @@ class Ball {
   draw(ctx) {
     if (!this.active) return;
 
+    const tc  = this.element === 'fire' ? '#ff6600' : this.element === 'ice' ? '#00ccff' : this.element === 'electric' ? '#aa44ff' : '#00f5ff';
+    const bc2 = this.element === 'fire' ? '#ff4400' : this.element === 'ice' ? '#aaeeff' : this.element === 'electric' ? '#8822ff' : '#00f5ff';
+    const bc3 = this.element === 'fire' ? '#cc0000' : this.element === 'ice' ? '#0066aa' : this.element === 'electric' ? '#330088' : '#0033cc';
+
     // Trail
     for (let i = 0; i < this.trail.length; i++) {
       const t = this.trail[i];
@@ -710,8 +787,8 @@ class Ball {
       const r = BALL_RADIUS * (i / this.trail.length);
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#00f5ff';
-      ctx.shadowColor = '#00f5ff';
+      ctx.fillStyle = tc;
+      ctx.shadowColor = tc;
       ctx.shadowBlur = 5;
       ctx.beginPath();
       ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
@@ -721,12 +798,12 @@ class Ball {
 
     // Ball
     ctx.save();
-    ctx.shadowColor = '#00f5ff';
+    ctx.shadowColor = tc;
     ctx.shadowBlur = 14;
     const grad = ctx.createRadialGradient(this.x - 2, this.y - 2, 1, this.x, this.y, BALL_RADIUS);
     grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.5, '#00f5ff');
-    grad.addColorStop(1, '#0033cc');
+    grad.addColorStop(0.5, bc2);
+    grad.addColorStop(1, bc3);
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
@@ -833,6 +910,12 @@ class Game {
     // Run upgrades
     this.runUpgrades = [];
     this.firstHitThisTurn = true;
+
+    // V4A: Element & combo state
+    this.comboCount = 0;
+    this.fireBallLaunchCount = 0;
+    this.iceEchoUsed = false;
+    this.electricHitCount = 0;
 
     // Danger state
     this.warningActive = false;
@@ -970,6 +1053,11 @@ class Game {
     if (this.hasUpgrade('slow_descent') && this.stage % 8 === 0) slowBonus = 1;
 
     for (const block of this.blocks) {
+      if (block.frozen) {
+        block.frozenTurns--;
+        if (block.frozenTurns <= 0) block.frozen = false;
+        continue;
+      }
       block.row += (1 - slowBonus);
     }
 
@@ -1000,6 +1088,9 @@ class Game {
     if (this.phase !== GamePhase.IDLE) return;
     this.phase = GamePhase.SHOOTING;
     this.firstHitThisTurn = true;
+    this.iceEchoUsed = false;
+    this.electricHitCount = 0;
+    this.comboCount = 0;
     this.turn++;
 
     const totalBalls = this.ballCount;
@@ -1018,7 +1109,12 @@ class Game {
       if (spread) a += (launched % 2 === 0 ? 1 : -1) * 0.08 * Math.ceil(launched / 2);
       const vx = Math.cos(a) * spd;
       const vy = Math.sin(a) * spd;
-      this.balls.push(new Ball(lx, ly, vx, vy, { piercingLeft: piercing }));
+      let ballElement = null;
+      if (this.hasUpgrade('fire_core')) {
+        this.fireBallLaunchCount++;
+        if (this.fireBallLaunchCount % 5 === 0) ballElement = 'fire';
+      }
+      this.balls.push(new Ball(lx, ly, vx, vy, { piercingLeft: piercing, element: ballElement }));
       launched++;
       this.pendingBalls--;
       if (launched < totalBalls) setTimeout(launchNext, FIRE_DELAY);
@@ -1267,6 +1363,96 @@ class Game {
     }
   }
 
+  // ---- V4A: Combo system ----
+
+  onBlockDestroyed(block) {
+    this.comboCount++;
+    const count = this.comboCount;
+    let label = null, color = '#ffee00', shardBonus = 0;
+    if (count === 2)  { label = 'x2 Combo';        color = '#ffee00'; shardBonus = 1; }
+    if (count === 5)  { label = 'x5 Neon Combo';    color = '#ff88ff'; shardBonus = 2; }
+    if (count === 10) { label = 'x10 Siege Frenzy'; color = '#ff6600'; shardBonus = 3; }
+    if (count === 20) { label = 'x20 Neon Frenzy';  color = '#ff2200'; shardBonus = 5; }
+    if (label) {
+      floatingTexts.push(new ComboText(W / 2, H * 0.42, label, color));
+      if (shardBonus > 0) this.earnShards(shardBonus);
+    }
+  }
+
+  // ---- V4A: Element system ----
+
+  applyElementHit(ball, block, destroyed) {
+    if (ball.element === 'fire') {
+      this.applyFireEffect(block.col, block.row, block.cx, block.cy);
+    } else if (ball.element === 'ice' && !destroyed && !block.frozen) {
+      this.applyIceEffect(block);
+    } else if (ball.element === 'electric') {
+      this.applyElectricEffect(block.col, block.row, block.cx, block.cy);
+    }
+    // Ice Echo upgrade: freeze on first hit per turn (independent of ball element)
+    if (this.hasUpgrade('ice_echo') && !this.iceEchoUsed && !destroyed && !block.frozen && ball.element !== 'ice') {
+      this.iceEchoUsed = true;
+      this.applyIceEffect(block);
+    }
+    // Electric Chain upgrade: every 4th hit arcs (independent of ball element)
+    if (this.hasUpgrade('elec_chain') && ball.element !== 'electric') {
+      this.electricHitCount++;
+      if (this.electricHitCount % 4 === 0) {
+        this.applyElectricEffect(block.col, block.row, block.cx, block.cy);
+      }
+    }
+  }
+
+  applyFireEffect(col, row, cx, cy) {
+    const areaDmg = 1 + (this.hasUpgrade('burn_impact') ? 1 : 0);
+    for (const b of this.blocks) {
+      if (!b.alive) continue;
+      if (b.col === col && b.row === row) continue;
+      if (Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1) {
+        b.hit(areaDmg, this);
+      }
+    }
+    spawnParticles(cx, cy, '#ff6600', 8, { speed: 3.5, decay: 0.045, size: 3, gravity: -0.06 });
+    spawnParticles(cx, cy, '#ffaa00', 5, { speed: 2.5, decay: 0.05,  size: 2, gravity: -0.09 });
+  }
+
+  applyIceEffect(block) {
+    block.frozen = true;
+    block.frozenTurns = 1;
+    block.hitFlash = 3;
+    spawnParticles(block.cx, block.cy, '#00ccff', 8, { speed: 2.5, decay: 0.05, size: 2.5 });
+    spawnParticles(block.cx, block.cy, '#aaeeff', 5, { speed: 1.5, decay: 0.07, size: 2 });
+    if (this.hasUpgrade('frost_barrier')) {
+      const neighbors = this.blocks.filter(b =>
+        b.alive && !b.frozen &&
+        !(b.col === block.col && b.row === block.row) &&
+        Math.abs(b.col - block.col) <= 1 && Math.abs(b.row - block.row) <= 1
+      );
+      if (neighbors.length > 0 && Math.random() < 0.4) {
+        const nb = randItem(neighbors);
+        nb.frozen = true;
+        nb.frozenTurns = 1;
+        spawnParticles(nb.cx, nb.cy, '#aaeeff', 6, { speed: 2, decay: 0.06, size: 2 });
+      }
+    }
+  }
+
+  applyElectricEffect(col, row, cx, cy) {
+    const maxJumps = this.hasUpgrade('overcharge') ? 3 : 2;
+    const candidates = this.blocks.filter(b =>
+      b.alive && !(b.col === col && b.row === row) &&
+      ((Math.abs(b.col - col) <= 1 && Math.abs(b.row - row) <= 1) ||
+       (b.row === row && Math.abs(b.col - col) <= 2))
+    );
+    const targets = candidates.sort(() => Math.random() - 0.5).slice(0, maxJumps);
+    for (const target of targets) {
+      target.hit(1, this);
+      spawnParticles(target.cx, target.cy, '#aa44ff', 5, { speed: 3, decay: 0.07, size: 2 });
+      laserBeams.push({ x1: cx, y1: cy, x2: target.cx, y2: target.cy, color: '#aa44ff', life: 5 });
+    }
+    spawnParticles(cx, cy, '#6644ff', 6, { speed: 2.5, decay: 0.08, size: 2.5 });
+  }
+
   // ---- Turn end ----
 
   processTurnEnd() {
@@ -1322,7 +1508,10 @@ class Game {
 
   showUpgradeChoice() {
     this.phase = GamePhase.UPGRADE;
-    const available = RUN_UPGRADES.filter(u => !this.hasUpgrade(u.id) || u.id === 'ball_plus');
+    const available = RUN_UPGRADES.filter(u =>
+      (!this.hasUpgrade(u.id) || u.id === 'ball_plus') &&
+      (!u.minStage || this.stage >= u.minStage)
+    );
     const picks = available.sort(() => Math.random() - 0.5).slice(0, 3);
 
     const container = document.getElementById('upgrade-cards');
