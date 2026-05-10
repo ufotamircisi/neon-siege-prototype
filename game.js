@@ -883,42 +883,42 @@ class Marker {
   get cx() { return this.x + blockW / 2; }
   get cy() { return this.y + blockH / 2; }
 
+  // V6C: Ghost-style draw — clearly NOT a block (no solid fill, no HP number, just a glowing symbol)
   draw(ctx) {
     if (!this.alive) return;
-    this.pulse += 0.06;
+    this.pulse += 0.07;
     const mc = MARKER_COLORS[this.type];
     if (!mc) return;
     const glow = 0.5 + 0.5 * Math.sin(this.pulse);
-    const x = this.x, y = this.y;
-    const pad = Math.max(2, blockW * 0.08);
 
     ctx.save();
-    ctx.shadowColor = mc.glow;
-    ctx.shadowBlur = 8 + glow * 10;
 
-    // Body (slightly inset to read differently from solid blocks)
-    roundRect(ctx, x + pad, y + pad, blockW - pad * 2, blockH - pad * 2, 4);
+    // Very faint ghost background (≈10% opacity) — signals "open cell, not a wall"
+    ctx.globalAlpha = 0.10 + glow * 0.06;
     ctx.fillStyle = mc.fill;
+    roundRect(ctx, this.x + 2, this.y + 2, blockW - 4, blockH - 4, 6);
     ctx.fill();
-    ctx.strokeStyle = hexToRgba(mc.stroke, 0.7 + glow * 0.3);
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    ctx.globalAlpha = 1;
 
-    // Outer dashed border — distinguishes markers from blocks
+    // Animated dashed neon border ring
+    ctx.shadowColor = mc.glow;
+    ctx.shadowBlur = 8 + glow * 14;
+    ctx.strokeStyle = hexToRgba(mc.stroke, 0.28 + glow * 0.42);
+    ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 5]);
-    roundRect(ctx, x + 2, y + 2, blockW - 4, blockH - 4, 6);
-    ctx.strokeStyle = hexToRgba(mc.stroke, 0.3 + glow * 0.2);
-    ctx.lineWidth = 1;
+    roundRect(ctx, this.x + 3, this.y + 3, blockW - 6, blockH - 6, 5);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Type label
-    ctx.shadowBlur = 4;
+    // Large bright symbol — the only label; no HP number ever shown here
+    ctx.shadowBlur = 6 + glow * 12;
     ctx.fillStyle = mc.stroke;
-    ctx.font = `bold ${blockH > 28 ? 14 : 11}px 'Courier New'`;
+    ctx.globalAlpha = 0.80 + glow * 0.20;
+    ctx.font = `bold ${blockH > 28 ? 19 : 15}px 'Courier New'`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(mc.label, this.cx, this.cy);
+
     ctx.restore();
   }
 }
@@ -1334,10 +1334,11 @@ class Game {
   // V6A: Single balance table — all difficulty values derived here for easy tuning
   stageBalance(stage) {
     const isMilestone = (stage % BOSS_INTERVAL === 0);
+    const approxBalls = Math.min(stage, 30);            // V6C: ball count is capped at 30 by V6A
     return {
-      blockHp:       stage * 0.9 + 1,                                          // base HP (pre-multipliers)
+      blockHp:       Math.min(stage * 0.9 + 1, approxBalls * 1.5 + 2),        // V6C: caps at ~47 HP (30 balls × 1.5)
       milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
-      skipChance:    isMilestone ? 0.08 : Math.max(0.15, 0.35 - stage * 0.015),// fewer gaps on milestones
+      skipChance:    isMilestone ? 0.08 : Math.max(0.20, 0.40 - stage * 0.015),// V6C: min 20% gaps — keeps rows readable
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
       mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
@@ -1702,7 +1703,7 @@ class Game {
   // ---- Marker trigger ----
 
   triggerMarker(marker, ball) {
-    marker.cooldown = 8;
+    marker.alive = false; // V6C: one-shot — first ball touch activates and removes it
     const cx = marker.cx, cy = marker.cy;
 
     switch (marker.type) {
