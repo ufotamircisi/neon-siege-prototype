@@ -1235,6 +1235,8 @@ class Game {
     this.shardMultiplier = 1.0;
     this.startShieldLevel = 0;
     this.applyPermUpgrades();
+    // V6A: Ball count floor — new stage always starts with at least stage balls
+    this.ballCount = Math.max(this.ballCount, this.stage);
 
     // Run upgrades
     this.runUpgrades = [];
@@ -1327,17 +1329,33 @@ class Game {
 
   // ---- Block spawning ----
 
+  // V6A: Single balance table — all difficulty values derived here for easy tuning
+  stageBalance(stage) {
+    const isMilestone = (stage % BOSS_INTERVAL === 0);
+    return {
+      blockHp:       stage * 0.9 + 1,                                          // base HP (pre-multipliers)
+      milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
+      skipChance:    isMilestone ? 0.08 : Math.max(0.15, 0.35 - stage * 0.015),// fewer gaps on milestones
+      triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
+      mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
+      markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
+      isMilestone,
+    };
+  }
+
   blockHpForStage(stage) {
-    const base = Math.ceil(1 + stage * 0.9 + (stage > 5 ? stage * 0.55 : 0));
-    return this.hasRelic('siege_engine') ? Math.ceil(base * 1.12) : base;
+    const bal       = this.stageBalance(stage);
+    const relicMult = this.hasRelic('siege_engine') ? 1.12 : 1.0;
+    return Math.max(1, Math.ceil(bal.blockHp * bal.milestoneMult * relicMult));
   }
 
   spawnStageBlocks() {
     const stage = this.stage;
-    const hp = this.blockHpForStage(stage);
-    const isBossStage = stage % BOSS_INTERVAL === 0;
-    const triChance     = stage >= 5 ? Math.min(0.35, (stage - 4) * 0.05) : 0;
-    const mysteryChance = stage >= 3 ? Math.min(0.10, (stage - 2) * 0.02) : 0;
+    const bal   = this.stageBalance(stage);      // V6A: single source of truth
+    const hp    = this.blockHpForStage(stage);
+    const isBossStage   = bal.isMilestone;
+    const triChance     = bal.triChance;
+    const mysteryChance = bal.mysteryChance;
 
     // Generate one row of blocks at the top
     for (let col = 0; col < COLS; col++) {
@@ -1358,8 +1376,8 @@ class Game {
         type = BlockType.CRYSTAL;
       }
 
-      // Skip some columns for variety
-      if (type === BlockType.NORMAL && Math.random() < 0.25) continue;
+      // V6A: Skip chance from stageBalance (fewer gaps on milestone stages)
+      if (type === BlockType.NORMAL && Math.random() < bal.skipChance) continue;
 
       const blockHp = type === BlockType.BOSS ? hp * 4 : hp;
       const newBlock = new Block(col, 0, type, blockHp);
@@ -1387,8 +1405,8 @@ class Game {
       }
     }
 
-    // Spawn a marker in a free column (stage 2+)
-    const markerChance = stage >= 2 ? Math.min(0.28, (stage - 1) * 0.04) : 0;
+    // Spawn a marker in a free column (stage 2+) — V6A: uses bal.markerChance
+    const markerChance = bal.markerChance;
     if (markerChance > 0 && Math.random() < markerChance) {
       const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols().includes(c));
       if (freeCols.length > 0) {
@@ -2081,10 +2099,23 @@ class Game {
     this.blackHoles = this.blackHoles.filter(bh => bh.alive && bh.y < launcherY - 20);
     this.portals    = this.portals.filter(pp => pp.alive && pp.ay < launcherY - 20 && pp.by < launcherY - 20);
 
-    // V4B: Boss defeated → relic choice (takes priority over upgrade interval)
+    // V6A: Per-shot ball growth — +1 after each turn, floor at stage, cap at 30
+    this.ballCount = Math.min(30, this.ballCount + 1);
+    this.ballCount = Math.max(this.ballCount, this.stage);
+    this.updateHUD();
+
+    // V6A: Milestone rewards on boss defeat (takes priority over upgrade interval)
     if (this.bossDefeatedThisTurn) {
       this.bossDefeatedThisTurn = false;
-      setTimeout(() => this.showRelicChoice(), 600);
+      const milestoneNum = Math.max(1, Math.floor((this.stage - 1) / BOSS_INTERVAL));
+      const bonusShards  = 15 + milestoneNum * 10;
+      this.earnShards(bonusShards);
+      this.powLightning  = Math.min(this.powLightning + 1, 3);
+      this.updatePowerBar();
+      floatingTexts.push(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
+      floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+SHARDS & POWER RESTORED', '#00ff88'));
+      screenShake(10, 6);
+      setTimeout(() => this.showRelicChoice(), 700);
       return;
     }
 
