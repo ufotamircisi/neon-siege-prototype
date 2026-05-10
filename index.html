@@ -18,7 +18,7 @@
         </div>
         <div class="stats-row">
           <div class="stat-box">
-            <div class="stat-label">BEST STAGE</div>
+            <div class="stat-label">HIGHEST LEVEL</div>
             <div class="stat-value" id="menu-best-stage">0</div>
           </div>
           <div class="stat-box">
@@ -26,12 +26,26 @@
             <div class="stat-value" id="menu-shards">0</div>
           </div>
         </div>
-        <button class="btn btn-primary" id="btn-start">START RUN</button>
+        <button class="btn btn-primary" id="btn-continue">CONTINUE</button>
+        <button class="btn btn-secondary" id="btn-start">LEVELS</button>
         <button class="btn btn-secondary" id="btn-upgrades">UPGRADES</button>
         <button class="btn btn-secondary" id="btn-achievements">
           ACHIEVEMENTS
           <span class="btn-badge" id="menu-ach-count">0 / 25</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Level Select Screen -->
+    <div id="screen-levelselect" class="screen">
+      <div class="menu-bg"></div>
+      <div class="level-select-wrap">
+        <div class="ls-header-bar">
+          <h2 class="screen-title">SELECT LEVEL</h2>
+          <div class="ls-progress" id="ls-progress">0 / 100 CLEARED</div>
+        </div>
+        <div class="level-grid" id="level-grid"></div>
+        <button class="btn btn-secondary ls-back-btn" id="btn-back-levelselect">← BACK</button>
       </div>
     </div>
 
@@ -66,7 +80,7 @@
     <div id="screen-game" class="screen">
       <div id="hud">
         <div class="hud-left">
-          <div class="hud-item">STAGE <span id="hud-stage">1</span></div>
+          <div class="hud-item">LEVEL <span id="hud-stage">1</span></div>
           <div class="hud-item">SCORE <span id="hud-score">0</span></div>
         </div>
         <div class="hud-center">
@@ -102,7 +116,7 @@
       <div class="overlay-panel">
         <h2 class="screen-title">PAUSED</h2>
         <button class="btn btn-primary" id="btn-resume">RESUME</button>
-        <button class="btn btn-secondary" id="btn-restart-pause">RESTART</button>
+        <button class="btn btn-secondary" id="btn-restart-pause">RESTART LEVEL</button>
         <button class="btn btn-secondary" id="btn-menu-pause">MAIN MENU</button>
       </div>
     </div>
@@ -115,13 +129,39 @@
       </div>
     </div>
 
+    <!-- Level Complete Screen -->
+    <div id="screen-levelcomplete" class="screen overlay">
+      <div class="overlay-panel">
+        <h2 class="screen-title levelcomplete-title">LEVEL CLEAR!</h2>
+        <div class="result-list">
+          <div class="result-row">
+            <span>Level</span>
+            <span id="lc-level">0</span>
+          </div>
+          <div class="result-row">
+            <span>Score</span>
+            <span id="lc-score">0</span>
+          </div>
+          <div class="result-row highlight">
+            <span>◈ Shards Earned</span>
+            <span id="lc-shards">0</span>
+          </div>
+          <div class="result-row bonus-row">
+            <span id="lc-bonus"></span>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-next-level">NEXT LEVEL →</button>
+        <button class="btn btn-secondary" id="btn-goto-levelselect">LEVEL SELECT</button>
+      </div>
+    </div>
+
     <!-- Game Over Screen -->
     <div id="screen-gameover" class="screen overlay">
       <div class="overlay-panel">
         <h2 class="screen-title gameover-title">GAME OVER</h2>
         <div class="result-list">
           <div class="result-row">
-            <span>Stage Reached</span>
+            <span>Level Reached</span>
             <span id="go-stage">0</span>
           </div>
           <div class="result-row">
@@ -133,11 +173,11 @@
             <span id="go-shards">0</span>
           </div>
           <div class="result-row">
-            <span>Best Stage</span>
+            <span>Best Level</span>
             <span id="go-best">0</span>
           </div>
         </div>
-        <button class="btn btn-primary" id="btn-restart-go">PLAY AGAIN</button>
+        <button class="btn btn-primary" id="btn-restart-go">RETRY LEVEL</button>
         <button class="btn btn-secondary" id="btn-menu-go">MAIN MENU</button>
       </div>
     </div>

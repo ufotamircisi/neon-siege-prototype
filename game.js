@@ -20,6 +20,12 @@ const BOSS_INTERVAL = 10;   // every N stages add boss block
 const FIRE_DELAY = 55;      // ms between successive ball launches
 const MAX_ORBS = 2;         // max ball-pickup orbs on board simultaneously
 const ORB_SPAWN_CHANCE = 0.22; // probability of orb spawn per stage
+const TOTAL_LEVELS = 100;   // V6D: total generated levels
+
+// V6D: waves (block rows) to spawn per level — grows gradually, caps at 12
+function levelWaves(level) {
+  return Math.min(3 + Math.floor(level * 0.4), 12);
+}
 
 // Permanent upgrades config
 const PERM_UPGRADES = [
@@ -156,10 +162,15 @@ const Save = {
           }
         }
         if (!d.achievements) d.achievements = {};
+        // V6D: level progress migration
+        if (!d.highestUnlockedLevel) d.highestUnlockedLevel = 1;
+        if (!d.completedLevels)      d.completedLevels = [];
+        if (!d.levelBestScore)       d.levelBestScore = {};
         return d;
       }
     } catch(e) {}
-    return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {} };
+    return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
+             highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {} };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -245,7 +256,7 @@ const Achievements = {
 // SCREEN MANAGER
 // ============================================================
 
-const OVERLAY_SCREENS = new Set(['pause', 'upgrade-choice', 'gameover']);
+const OVERLAY_SCREENS = new Set(['pause', 'upgrade-choice', 'gameover', 'levelcomplete']);
 
 const Screens = {
   current: null,
@@ -1214,7 +1225,9 @@ const GamePhase = {
 };
 
 class Game {
-  constructor() {
+  // V6D: level param selects which level to play (1 = first level)
+  constructor(level = 1) {
+    this.level = Math.max(1, level);
     this.reset();
   }
 
@@ -1222,21 +1235,26 @@ class Game {
     resizeCanvas();
 
     // Run stats
-    this.stage = 1;
+    this.stage = 1;  // internal turn counter within the level
     this.score = 0;
     this.shards = 0;
     this.phase = GamePhase.IDLE;
     this.turn = 0;
     this.laserTurnCounter = 0;
 
-    // Apply permanent upgrades
-    this.ballCount = 1;
+    // V6D: level wave tracking
+    this.wavesSpawned = 0;
+    this.maxWaves     = levelWaves(this.level);
+    this.levelCleared = false;
+
+    // Apply permanent upgrades (start ball count from level number)
+    this.ballCount = Math.min(this.level, 30); // V6D: level N starts with N balls (cap 30)
     this.ballDamage = 1;
     this.shardMultiplier = 1.0;
     this.startShieldLevel = 0;
     this.applyPermUpgrades();
-    // V6A: Ball count floor — new stage always starts with at least stage balls
-    this.ballCount = Math.max(this.ballCount, this.stage);
+    // V6D: ball floor = min(level, 30)
+    this.ballCount = Math.max(this.ballCount, Math.min(this.level, 30));
 
     // Run upgrades
     this.runUpgrades = [];
@@ -1353,10 +1371,11 @@ class Game {
   }
 
   spawnStageBlocks() {
-    const stage = this.stage;
-    const bal   = this.stageBalance(stage);      // V6A: single source of truth
+    if (this.wavesSpawned >= this.maxWaves) return; // V6D: wave limit
+    const stage = this.level;                        // V6D: difficulty from level
+    const bal   = this.stageBalance(stage);
     const hp    = this.blockHpForStage(stage);
-    const isBossStage   = bal.isMilestone;
+    const isBossThisWave = bal.isMilestone && this.wavesSpawned === 0; // boss only on wave 0
     const triChance     = bal.triChance;
     const mysteryChance = bal.mysteryChance;
 
@@ -1365,7 +1384,7 @@ class Game {
       const rnd = Math.random();
       let type = BlockType.NORMAL;
 
-      if (isBossStage && col === Math.floor(COLS / 2)) {
+      if (isBossThisWave && col === Math.floor(COLS / 2)) {
         type = BlockType.BOSS;
       } else if (mysteryChance > 0 && Math.random() < mysteryChance) {
         type = BlockType.MYSTERY;
@@ -1436,6 +1455,8 @@ class Game {
       const by = blockPad + rowB * (blockH + blockPad) + blockH / 2;
       this.portals.push(new PortalPair(ax, ay, bx, by));
     }
+
+    this.wavesSpawned++; // V6D
   }
 
   _pickMarkerType(stage) {
@@ -2055,6 +2076,7 @@ class Game {
     Screens.show('game');
     this.phase = GamePhase.IDLE;
     this.updateHUD();
+    this.checkLevelComplete(); // V6D
   }
 
   // ---- Turn end ----
@@ -2101,7 +2123,7 @@ class Game {
     if (this.hasUpgrade('regen')) this.earnShards(5);
 
     // Score
-    const scoreGain = this.stage * 10;
+    const scoreGain = this.level * 10;
     this.score += scoreGain;
     document.getElementById('hud-score').textContent = this.score;
 
@@ -2115,12 +2137,12 @@ class Game {
 
     // Spawn new row for next stage
     this.stage++;
-    document.getElementById('hud-stage').textContent = this.stage;
+    document.getElementById('hud-stage').textContent = this.level; // V6D: display level
 
     this.spawnStageBlocks();
 
     // Shard earn per stage
-    this.earnShards(randInt(2, 5) + Math.floor(this.stage / 5));
+    this.earnShards(randInt(2, 5) + Math.floor(this.level / 5));
 
     // V4B: Descend anomalies; cull those too close to launcher
     for (const bh of this.blackHoles) bh.descend();
@@ -2128,15 +2150,15 @@ class Game {
     this.blackHoles = this.blackHoles.filter(bh => bh.alive && bh.y < launcherY - 20);
     this.portals    = this.portals.filter(pp => pp.alive && pp.ay < launcherY - 20 && pp.by < launcherY - 20);
 
-    // V6A: Per-shot ball growth — +1 after each turn, floor at stage, cap at 30
+    // V6D: Per-shot ball growth — +1 after each turn, floor at level (capped 30)
     this.ballCount = Math.min(30, this.ballCount + 1);
-    this.ballCount = Math.max(this.ballCount, this.stage);
+    this.ballCount = Math.max(this.ballCount, Math.min(this.level, 30));
     this.updateHUD();
 
     // V6A: Milestone rewards on boss defeat (takes priority over upgrade interval)
     if (this.bossDefeatedThisTurn) {
       this.bossDefeatedThisTurn = false;
-      const milestoneNum = Math.max(1, Math.floor((this.stage - 1) / BOSS_INTERVAL));
+      const milestoneNum = Math.max(1, Math.floor((this.level - 1) / BOSS_INTERVAL));
       const bonusShards  = 15 + milestoneNum * 10;
       this.earnShards(bonusShards);
       this.powBomb = Math.min(this.powBomb + 1, 6);
@@ -2150,13 +2172,16 @@ class Game {
     }
 
     // Check upgrade interval
-    if (this.stage % UPGRADE_INTERVAL === 1 && this.stage > 1) {
+    if (this.turn % UPGRADE_INTERVAL === 0) {
       setTimeout(() => this.showUpgradeChoice(), 400);
       return;
     }
 
-    this.phase = GamePhase.IDLE;
-    this.updateHUD();
+    this.checkLevelComplete();
+    if (!this.levelCleared) {
+      this.phase = GamePhase.IDLE;
+      this.updateHUD();
+    }
   }
 
   // ---- Upgrade Choice ----
@@ -2199,6 +2224,7 @@ class Game {
     Screens.show('game');
     this.phase = GamePhase.IDLE;
     this.updateHUD();
+    this.checkLevelComplete(); // V6D
   }
 
   // ---- Game Over ----
@@ -2207,10 +2233,10 @@ class Game {
     this.warningActive = false;
     this.phase = GamePhase.GAMEOVER;
 
-    if (this.stage > saveData.bestStage) saveData.bestStage = this.stage;
+    if (this.level > saveData.bestStage) saveData.bestStage = this.level;
     Save.save(saveData);
 
-    document.getElementById('go-stage').textContent = this.stage;
+    document.getElementById('go-stage').textContent = this.level;
     document.getElementById('go-score').textContent = this.score;
     document.getElementById('go-shards').textContent = this.shards;
     document.getElementById('go-best').textContent = saveData.bestStage;
@@ -2218,10 +2244,37 @@ class Game {
     setTimeout(() => Screens.show('gameover'), 700);
   }
 
+  checkLevelComplete() {
+    if (this.levelCleared || this.phase === GamePhase.GAMEOVER) return;
+    if (this.wavesSpawned < this.maxWaves) return;
+    if (this.blocks.filter(b => b.alive).length > 0) return;
+    this.levelCleared = true;
+    this.phase = GamePhase.GAMEOVER;
+    setTimeout(() => this.onLevelComplete(), 600);
+  }
+
+  onLevelComplete() {
+    const lv = this.level;
+    if (!saveData.completedLevels.includes(lv)) saveData.completedLevels.push(lv);
+    if (saveData.highestUnlockedLevel <= lv) saveData.highestUnlockedLevel = lv + 1;
+    if (!saveData.levelBestScore[lv] || this.score > saveData.levelBestScore[lv])
+      saveData.levelBestScore[lv] = this.score;
+    if (lv > saveData.bestStage) saveData.bestStage = lv;
+    const shardsEarned = this.shards;
+    saveData.totalShards += shardsEarned;
+    Save.save(saveData);
+    document.getElementById('lc-level').textContent  = lv;
+    document.getElementById('lc-score').textContent  = this.score;
+    document.getElementById('lc-shards').textContent = shardsEarned;
+    const isMilestone = lv % BOSS_INTERVAL === 0;
+    document.getElementById('lc-bonus').textContent  = isMilestone ? '★ MILESTONE BONUS!' : '';
+    Screens.show('levelcomplete');
+  }
+
   // ---- HUD ----
 
   updateHUD() {
-    document.getElementById('hud-stage').textContent = this.stage;
+    document.getElementById('hud-stage').textContent = this.level;
     document.getElementById('hud-score').textContent = this.score;
     document.getElementById('hud-shards').textContent = this.shards;
     document.getElementById('balls-count').textContent = this.ballCount;
@@ -2487,8 +2540,30 @@ class Game {
 // MAIN MENU
 // ============================================================
 
+function buildLevelSelectGrid() {
+  const grid = document.getElementById('level-grid');
+  grid.innerHTML = '';
+  const unlocked = saveData.highestUnlockedLevel;
+  for (let i = 1; i <= TOTAL_LEVELS; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'level-btn';
+    btn.textContent = i;
+    const completed  = saveData.completedLevels.includes(i);
+    const isUnlocked = i <= unlocked;
+    if (completed)        btn.classList.add('level-completed');
+    else if (isUnlocked)  btn.classList.add('level-unlocked');
+    else { btn.classList.add('level-locked'); btn.disabled = true; }
+    if (isUnlocked) btn.addEventListener('click', () => { game = new Game(i); Screens.show('game'); });
+    grid.appendChild(btn);
+  }
+  const progressEl = document.getElementById('ls-progress');
+  if (progressEl) progressEl.textContent = saveData.completedLevels.length + ' / ' + TOTAL_LEVELS + ' CLEARED';
+  const currentBtn = grid.children[unlocked - 1];
+  if (currentBtn) setTimeout(() => currentBtn.scrollIntoView({ block: 'center' }), 50);
+}
+
 function updateMenuDisplay() {
-  document.getElementById('menu-best-stage').textContent = saveData.bestStage;
+  document.getElementById('menu-best-stage').textContent = Math.max(0, saveData.highestUnlockedLevel - 1);
   document.getElementById('menu-shards').textContent = saveData.totalShards;
   // V5B: Achievement count badge
   const unlockedN = ACHIEVEMENTS.filter(a => Achievements.isUnlocked(a.id)).length;
@@ -2681,7 +2756,12 @@ canvas.addEventListener('touchend', onPointerUp, { passive: false });
 // ============================================================
 
 document.getElementById('btn-start').addEventListener('click', () => {
-  game = new Game();
+  buildLevelSelectGrid();
+  Screens.show('levelselect');
+});
+
+document.getElementById('btn-continue').addEventListener('click', () => {
+  game = new Game(saveData.highestUnlockedLevel);
   Screens.show('game');
 });
 
@@ -2712,7 +2792,8 @@ document.getElementById('btn-pause').addEventListener('click', () => {
 document.getElementById('btn-resume').addEventListener('click', () => Screens.show('game'));
 
 document.getElementById('btn-restart-pause').addEventListener('click', () => {
-  game = new Game();
+  const lv = game ? game.level : 1;
+  game = new Game(lv);
   Screens.show('game');
 });
 
@@ -2722,7 +2803,8 @@ document.getElementById('btn-menu-pause').addEventListener('click', () => {
 });
 
 document.getElementById('btn-restart-go').addEventListener('click', () => {
-  game = new Game();
+  const lv = game ? game.level : 1;
+  game = new Game(lv);
   Screens.show('game');
 });
 
@@ -2742,6 +2824,22 @@ document.getElementById('btn-bomb').addEventListener('click', () => {
 
 document.getElementById('btn-recall').addEventListener('click', () => {
   if (game) game.recallBalls();
+});
+
+document.getElementById('btn-back-levelselect').addEventListener('click', () => {
+  updateMenuDisplay();
+  Screens.show('menu');
+});
+
+document.getElementById('btn-next-level').addEventListener('click', () => {
+  const lv = game ? game.level : 1;
+  game = new Game(lv + 1);
+  Screens.show('game');
+});
+
+document.getElementById('btn-goto-levelselect').addEventListener('click', () => {
+  buildLevelSelectGrid();
+  Screens.show('levelselect');
 });
 
 // ============================================================
