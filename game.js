@@ -2426,6 +2426,101 @@ class Game {
 function updateMenuDisplay() {
   document.getElementById('menu-best-stage').textContent = saveData.bestStage;
   document.getElementById('menu-shards').textContent = saveData.totalShards;
+  // V5B: Achievement count badge
+  const unlockedN = ACHIEVEMENTS.filter(a => Achievements.isUnlocked(a.id)).length;
+  const badge = document.getElementById('menu-ach-count');
+  if (badge) badge.textContent = unlockedN + ' / ' + ACHIEVEMENTS.length;
+}
+
+// ============================================================
+// V5B: BUILD ACHIEVEMENT LIST
+// ============================================================
+
+const ACH_CAT_LABELS = {
+  first:    'FIRST STEPS',
+  skill:    'SKILL',
+  survival: 'SURVIVAL',
+  longterm: 'LONG-TERM',
+  secret:   'SECRET',
+};
+
+function buildAchievementList() {
+  const total    = ACHIEVEMENTS.length;
+  const unlocked = ACHIEVEMENTS.filter(a => Achievements.isUnlocked(a.id)).length;
+
+  const summaryEl = document.getElementById('ach-summary');
+  if (summaryEl) summaryEl.textContent = unlocked + ' / ' + total + ' UNLOCKED';
+
+  const badge = document.getElementById('menu-ach-count');
+  if (badge) badge.textContent = unlocked + ' / ' + total;
+
+  const list = document.getElementById('ach-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const cats = ['first', 'skill', 'survival', 'longterm', 'secret'];
+  for (const cat of cats) {
+    const items = ACHIEVEMENTS.filter(a => a.cat === cat);
+    if (!items.length) continue;
+
+    const header = document.createElement('div');
+    header.className = 'ach-cat-header';
+    header.textContent = ACH_CAT_LABELS[cat] || cat.toUpperCase();
+    list.appendChild(header);
+
+    for (const ach of items) {
+      const isUnlocked = Achievements.isUnlocked(ach.id);
+      const isSecret   = !!ach.hidden && !isUnlocked;
+      const stateClass = isUnlocked ? 'ach-unlocked' : (isSecret ? 'ach-secret' : 'ach-locked');
+
+      const progress = (ach.stat && saveData.stats) ? (saveData.stats[ach.stat] || 0) : 0;
+      const pct      = (ach.target && !isUnlocked) ? Math.min(1, progress / ach.target) : (isUnlocked ? 1 : 0);
+      const hasProg  = !isSecret && ach.stat && ach.target;
+
+      const card = document.createElement('div');
+      card.className = 'ach-card ' + stateClass;
+
+      let html;
+      if (isSecret) {
+        html =
+          '<div class="ach-icon">🔒</div>' +
+          '<div class="ach-body">' +
+            '<div class="ach-title">SECRET ACHIEVEMENT</div>' +
+            '<div class="ach-desc">Keep playing to reveal this secret.</div>' +
+            (ach.reward > 0 ? '<div class="ach-reward">◈ ??? SHARDS</div>' : '') +
+          '</div>';
+      } else {
+        const iconChar = isUnlocked ? '✦' : '○';
+        const progHtml = hasProg
+          ? '<div class="ach-prog-wrap">' +
+              '<div class="ach-prog-label">' +
+                (isUnlocked ? 'COMPLETED' : (progress + ' / ' + ach.target)) +
+              '</div>' +
+              '<div class="ach-prog-bar">' +
+                '<div class="ach-prog-fill" style="width:' + Math.round(pct * 100) + '%"></div>' +
+              '</div>' +
+            '</div>'
+          : '';
+        const rewardHtml = ach.reward > 0
+          ? '<div class="ach-reward">+' + ach.reward + ' ◈ SHARDS</div>'
+          : '';
+        const checkHtml = isUnlocked ? '<div class="ach-check">✓</div>' : '';
+
+        html =
+          '<div class="ach-icon">' + iconChar + '</div>' +
+          '<div class="ach-body">' +
+            '<div class="ach-title">' + ach.title + '</div>' +
+            '<div class="ach-desc">' + ach.desc + '</div>' +
+            rewardHtml +
+            progHtml +
+          '</div>' +
+          checkHtml;
+      }
+
+      card.innerHTML = html;
+      list.appendChild(card);
+    }
+  }
 }
 
 function buildPermUpgradeList() {
@@ -2529,6 +2624,16 @@ document.getElementById('btn-start').addEventListener('click', () => {
 document.getElementById('btn-upgrades').addEventListener('click', () => {
   buildPermUpgradeList();
   Screens.show('upgrades');
+});
+
+document.getElementById('btn-achievements').addEventListener('click', () => {
+  buildAchievementList();
+  Screens.show('achievements');
+});
+
+document.getElementById('btn-back-ach').addEventListener('click', () => {
+  updateMenuDisplay();
+  Screens.show('menu');
 });
 
 document.getElementById('btn-back-menu').addEventListener('click', () => {
