@@ -12,7 +12,7 @@
 const COLS = 7;
 const BALL_SPEED = 9;
 const BALL_RADIUS = 9;        // collision radius — never change
-const BALL_DRAW_RADIUS = 13;  // visual radius — slightly bigger for readability
+const BALL_DRAW_RADIUS = 15;  // visual radius — bigger for mobile readability (collision stays 9)
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
 // V6D: computed dynamically in resizeCanvas() so the lose line sits near the launcher
 let DANGER_ROW = 14;        // blocks reaching this row → game over
@@ -321,7 +321,7 @@ function resizeCanvas() {
   blockPad = 7;
   blockW = (W - blockPad * (COLS + 1)) / COLS;
   blockH = blockW * 0.55;
-  launcherY = H - 48;
+  launcherY = H - 44; // V8: 4px lower → danger row shifts down one step
   // V7: danger line sits one block-row lower — blocks can come even closer to the cannon
   const rowH = blockH + blockPad;
   DANGER_ROW  = Math.max(13, Math.floor((launcherY - blockPad) / rowH));
@@ -1245,7 +1245,7 @@ class Launcher {
     if (Math.abs(diff) < 0.0015) {
       this.angle = this.targetAngle; // snap when negligibly close (prevents jitter)
     } else {
-      this.angle = lerp(this.angle, this.targetAngle, 0.30);
+      this.angle = lerp(this.angle, this.targetAngle, 0.22); // V8: slightly springier drag feel
     }
   }
 
@@ -1464,8 +1464,8 @@ class Game {
     return {
       blockHp:       Math.min(stage * 0.9 + 1, approxBalls * 1.5 + 2),        // V6C: caps at ~47 HP (30 balls × 1.5)
       milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
-      // V7: early levels very sparse (65% skip ≈ 2-3 blocks/row); later levels fill up (28% skip ≈ 5 blocks)
-      skipChance:    isMilestone ? 0.12 : Math.max(0.28, 0.65 - stage * 0.015),
+      // V8: early levels very sparse (70% skip ≈ 2 blocks/row); later levels fill up (28% skip ≈ 5 blocks)
+      skipChance:    isMilestone ? 0.12 : Math.max(0.28, 0.70 - stage * 0.018),
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
       mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
@@ -2558,16 +2558,16 @@ class Game {
     // Launcher + ball count label beneath it
     if (this.phase === GamePhase.IDLE || this.phase === GamePhase.SHOOTING) {
       this.launcher.draw(ctx);
-      // V7: "BALLS ×N" label just below cannon tip
+      // V8: "BALLS ×N" label just below cannon tip — readable on mobile
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.90;
       ctx.shadowColor = '#00f5ff';
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 14;
       ctx.fillStyle = '#00f5ff';
-      ctx.font = "bold 9px 'Courier New'";
-      ctx.fillText('BALLS \xd7' + this.ballCount, this.launcher.x, launcherY + 20);
+      ctx.font = "bold 12px 'Courier New'";
+      ctx.fillText('BALLS \xd7' + this.ballCount, this.launcher.x, launcherY + 22);
       ctx.restore();
     }
 
