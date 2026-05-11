@@ -169,11 +169,20 @@ const Save = {
         if (!d.completedLevels)               d.completedLevels = [];
         if (!d.levelBestScore)                d.levelBestScore = {};
         if (!('pendingMilestonePowers' in d)) d.pendingMilestonePowers = 0;
+        // V8C: Migrate to persistent power inventory (applies pending bonus if old save)
+        if (!('bombCount' in d)) {
+          const pending = d.pendingMilestonePowers || 0;
+          d.bombCount = 3 + pending;
+          d.multiplier10xCount = 3 + pending;
+          d.pendingMilestonePowers = 0;
+        }
+        if (!d.claimedMilestoneRewards) d.claimedMilestoneRewards = [];
         return d;
       }
     } catch(e) {}
     return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
-             highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0 };
+             highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0,
+             bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [] };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -181,6 +190,21 @@ const Save = {
 };
 
 let saveData = Save.load();
+
+// V8C: Power inventory helpers — use these for future purchase / reward systems
+function addPowerInventory(type, amount) {
+  if (type === 'bomb') {
+    saveData.bombCount = (saveData.bombCount || 0) + amount;
+  } else if (type === 'mult') {
+    saveData.multiplier10xCount = (saveData.multiplier10xCount || 0) + amount;
+  }
+  Save.save(saveData);
+  if (game) {
+    game.powBomb = saveData.bombCount;
+    game.powMult = saveData.multiplier10xCount;
+    game.updatePowerBar();
+  }
+}
 
 // ============================================================
 // V5A: ACHIEVEMENT TOAST
@@ -1380,11 +1404,9 @@ class Game {
     // Mystery guard (prevent recursive mystery effects)
     this.mysteryProcessing = false;
 
-    // Powers (V6B) — V7: consume any pending milestone bonus earned from last level clear
-    const _mPow = saveData.pendingMilestonePowers || 0;
-    if (_mPow > 0) { saveData.pendingMilestonePowers = 0; Save.save(saveData); }
-    this.powBomb = 3 + _mPow;   // left button — bomb (bottom 3 rows)
-    this.powMult = 3 + _mPow;   // right button — 10x ball multiplier
+    // V8C: Powers loaded from persistent inventory — never reset per level/restart
+    this.powBomb = saveData.bombCount;
+    this.powMult = saveData.multiplier10xCount;
     this.ballMultActive = false;
     this.lastShotAngle = null; // captured at fire time for mid-shot ×10 burst
     this.shotId      = 0;   // incremented each shoot(); recall uses this to cancel queued launches
@@ -1946,6 +1968,8 @@ class Game {
     if (this.phase !== GamePhase.IDLE && this.phase !== GamePhase.SHOOTING) return;
     if (this.powBomb <= 0) return;
     this.powBomb--;
+    saveData.bombCount = this.powBomb; // V8C: persist spend immediately
+    Save.save(saveData);
     this.turnPowerUsed = true;
     this.updatePowerBar();
 
@@ -1970,12 +1994,16 @@ class Game {
     if (this.powMult <= 0) return;
     if (this.phase === GamePhase.IDLE && !this.ballMultActive) {
       this.powMult--;
+      saveData.multiplier10xCount = this.powMult; // V8C: persist spend immediately
+      Save.save(saveData);
       this.turnPowerUsed = true;
       this.ballMultActive = true;
       this.updatePowerBar();
       floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
     } else if (this.phase === GamePhase.SHOOTING && this.lastShotAngle !== null) {
       this.powMult--;
+      saveData.multiplier10xCount = this.powMult; // V8C: persist spend immediately
+      Save.save(saveData);
       this.turnPowerUsed = true;
       this.updatePowerBar();
       const totalExtra = Math.min(this.ballCount * 10, 300);
@@ -2334,11 +2362,14 @@ class Game {
       const milestoneNum = Math.max(1, Math.floor((this.level - 1) / BOSS_INTERVAL));
       const bonusShards  = 15 + milestoneNum * 10;
       this.earnShards(bonusShards);
-      this.powBomb = Math.min(this.powBomb + 1, 6);
-      this.powMult = Math.min(this.powMult + 1, 6);
+      this.powBomb++;
+      this.powMult++;
+      saveData.bombCount = this.powBomb; // V8C: persist boss-defeat bonus
+      saveData.multiplier10xCount = this.powMult;
+      Save.save(saveData);
       this.updatePowerBar();
       floatingTexts.push(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
-      floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+SHARDS & POWER RESTORED', '#00ff88'));
+      floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+1 BOMB  +1 ×10  +SHARDS', '#00ff88'));
       screenShake(10, 6);
       setTimeout(() => this.showRelicChoice(), 700);
       return;
@@ -2440,13 +2471,20 @@ class Game {
     document.getElementById('lc-score').textContent  = this.score;
     document.getElementById('lc-shards').textContent = shardsEarned;
     const isMilestone = lv % BOSS_INTERVAL === 0;
-    if (isMilestone) {
-      // V7: grant +1 bomb and +1 ×10 mult for the NEXT game started
-      saveData.pendingMilestonePowers = Math.min((saveData.pendingMilestonePowers || 0) + 1, 3);
+    if (isMilestone && !saveData.claimedMilestoneRewards.includes(lv)) {
+      // V8C: Grant once per milestone level — persisted immediately
+      saveData.claimedMilestoneRewards.push(lv);
+      saveData.bombCount++;
+      saveData.multiplier10xCount++;
       Save.save(saveData);
+      // Sync in-memory counts for correct button display if player stays in session
+      this.powBomb = saveData.bombCount;
+      this.powMult = saveData.multiplier10xCount;
+      this.updatePowerBar();
       document.getElementById('lc-bonus').textContent = '★ MILESTONE REWARD: +1 BOMB  +1 ×10 MULT!';
     } else {
-      document.getElementById('lc-bonus').textContent = '';
+      document.getElementById('lc-bonus').textContent =
+        (isMilestone && saveData.claimedMilestoneRewards.includes(lv)) ? '(Milestone already claimed)' : '';
     }
     Screens.show('levelcomplete');
   }
@@ -2747,8 +2785,11 @@ function buildLevelSelectGrid() {
     if (completed)        btn.classList.add('level-completed');
     else if (isUnlocked)  btn.classList.add('level-unlocked');
     else { btn.classList.add('level-locked'); btn.disabled = true; }
-    // V7: milestone levels (10, 20, 30...) get a special gift-box visual
-    if (i % 10 === 0) btn.classList.add('level-milestone');
+    // Milestone levels get a special gift-box visual; claimed ones show a different state
+    if (i % 10 === 0) {
+      btn.classList.add('level-milestone');
+      if (saveData.claimedMilestoneRewards.includes(i)) btn.classList.add('level-milestone-claimed');
+    }
     if (isUnlocked) btn.addEventListener('click', () => { Screens.show('game'); game = new Game(i); });
     grid.appendChild(btn);
   }

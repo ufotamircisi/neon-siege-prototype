@@ -1015,6 +1015,17 @@ html, body {
   box-shadow: 0 0 22px rgba(255,210,0,0.55);
 }
 
+/* Claimed milestone — reward already collected; dimmer gold with ✓ badge */
+.level-btn.level-milestone.level-milestone-claimed::after {
+  content: '✓';
+  color: #88cc44;
+  text-shadow: 0 0 5px rgba(136,204,68,0.8);
+}
+.level-btn.level-milestone.level-milestone-claimed {
+  border-color: rgba(180,140,0,0.5);
+  box-shadow: 0 0 6px rgba(180,140,0,0.20), inset 0 0 5px rgba(180,140,0,0.05);
+}
+
 .ls-back-btn {
   margin: 8px 16px 12px;
   flex-shrink: 0;
