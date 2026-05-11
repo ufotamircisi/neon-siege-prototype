@@ -1231,7 +1231,6 @@ class Launcher {
     this.targetAngle = -Math.PI / 2; // V7B: pointer sets this; draw follows smoothly
     this.minAngle = -Math.PI + 0.18;
     this.maxAngle = -0.18;
-    this.dragging = false; // true while player drags cannon left/right
   }
 
   setAngleFromPoint(px, py) {
@@ -1281,24 +1280,6 @@ class Launcher {
     ctx.strokeStyle = '#00aaff';
     ctx.lineWidth = 1;
     ctx.stroke();
-
-    // Drag feedback — bright outer ring and ← → arrows while cannon is being repositioned
-    if (this.dragging) {
-      ctx.shadowBlur = 24;
-      ctx.shadowColor = '#00f5ff';
-      ctx.strokeStyle = 'rgba(0,245,255,0.85)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(lx, ly + 7, 32, 15, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = 'rgba(0,245,255,0.90)';
-      ctx.font = "bold 13px 'Courier New'";
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('←', lx - 42, ly + 7);
-      ctx.fillText('→', lx + 42, ly + 7);
-    }
 
     // Turret body — rotates visibly with aim angle (the tilt effect)
     ctx.save();
@@ -1419,10 +1400,6 @@ class Game {
 
     // Input
     this.aiming = false;
-    this.draggingCannon = false;  // V8B: cannon drag mode
-    this.dragStartX = 0;
-    this.dragStartY = 0;
-    this.dragStartLauncherX = 0;
     this.inputX = W / 2;
     this.inputY = 0;
 
@@ -2942,64 +2919,24 @@ function onPointerDown(e) {
   if (!game || game.phase !== GamePhase.IDLE) return;
   e.preventDefault();
   const pos = getCanvasPos(e);
-
-  // V8B: generous cannon hitbox — 64px wide, 55px tall zone around the base
-  const nearCannon = Math.abs(pos.x - game.launcher.x) < 64 && pos.y >= launcherY - 55;
-
-  if (nearCannon) {
-    // Start cannon drag; switch to aim if player quickly swipes upward
-    game.draggingCannon = true;
-    game.aiming = false;
-    game.dragStartX = pos.x;
-    game.dragStartY = pos.y;
-    game.dragStartLauncherX = game.launcher.x;
-    game.launcher.dragging = true;
-  } else if (pos.y < launcherY - 10) {
-    // Touch well above cannon → aim mode
-    game.aiming = true;
-    game.launcher.setAngleFromPoint(pos.x, pos.y);
-  }
+  // Touch anywhere on canvas → aim; cannon position is managed automatically
+  game.aiming = true;
+  game.launcher.setAngleFromPoint(pos.x, pos.y);
 }
 
 function onPointerMove(e) {
-  if (!game) return;
+  if (!game || !game.aiming) return;
   e.preventDefault();
   const pos = getCanvasPos(e);
-
-  if (game.draggingCannon) {
-    const dy = pos.y - game.dragStartY;
-    if (dy < -22) {
-      // Significant upward swipe from cannon zone → switch to aim mode
-      game.draggingCannon = false;
-      game.launcher.dragging = false;
-      game.aiming = true;
-      game.launcher.setAngleFromPoint(pos.x, pos.y);
-    } else {
-      // Horizontal slide → reposition cannon
-      const newX = game.dragStartLauncherX + (pos.x - game.dragStartX);
-      game.launcher.x = clamp(newX, BALL_RADIUS + 24, W - BALL_RADIUS - 24);
-    }
-  } else if (game.aiming) {
-    game.launcher.setAngleFromPoint(pos.x, pos.y);
-  }
+  game.launcher.setAngleFromPoint(pos.x, pos.y);
 }
 
 function onPointerUp(e) {
-  if (!game) return;
+  if (!game || !game.aiming) return;
   e.preventDefault();
-
-  if (game.draggingCannon) {
-    // End drag — no shot fired, cannon stays at new position
-    game.draggingCannon = false;
-    game.launcher.dragging = false;
-    return;
-  }
-
-  if (game.aiming) {
-    game.aiming = false;
-    game.shoot();
-    game.updatePowerBar();
-  }
+  game.aiming = false;
+  game.shoot();
+  game.updatePowerBar();
 }
 
 canvas.addEventListener('mousedown', onPointerDown);
