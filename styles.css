@@ -432,12 +432,9 @@ html, body {
   min-width: 0;
 }
 
-/* Ball count: "BALLS ×12" */
+/* Ball count is shown on canvas below the launcher — hide the HUD duplicate */
 #balls-indicator {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  text-align: center;
+  display: none;
 }
 
 .balls-label-pre {
@@ -483,13 +480,13 @@ html, body {
 .recall-btn {
   background: rgba(0,245,255,0.05);
   border: 1px solid rgba(0,245,255,0.28);
-  border-radius: 16px;
+  border-radius: 20px;
   color: var(--neon-cyan);
   font-family: 'Courier New', monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: bold;
   letter-spacing: 2px;
-  padding: 5px 18px;
+  padding: 10px 24px;
   cursor: pointer;
   transition: all 0.12s;
   white-space: nowrap;

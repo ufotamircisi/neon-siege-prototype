@@ -392,25 +392,33 @@ function screenShake(frames, amt) {
 // ============================================================
 
 const BlockType = {
-  NORMAL:    'normal',
-  EXPLOSIVE: 'explosive',
-  SHIELD:    'shield',
-  CRYSTAL:   'crystal',
-  BOSS:      'boss',
-  TRIANGLE:  'triangle',
-  INV_TRI:   'inv_tri',
-  MYSTERY:   'mystery',
+  NORMAL:      'normal',
+  EXPLOSIVE:   'explosive',
+  SHIELD:      'shield',
+  CRYSTAL:     'crystal',
+  BOSS:        'boss',
+  TRIANGLE:    'triangle',
+  INV_TRI:     'inv_tri',
+  MYSTERY:     'mystery',
+  // V6F: laser explosion blocks — fire beam on destruction (distinct from empty-space markers)
+  LASER_H:     'laser_h_block',
+  LASER_V:     'laser_v_block',
+  LASER_CROSS: 'laser_cross_block',
 };
 
 const BLOCK_COLORS = {
-  [BlockType.NORMAL]:    { fill: '#1a1050', stroke: '#6644ff', glow: '#6644ff' },
-  [BlockType.EXPLOSIVE]: { fill: '#2a0808', stroke: '#ff3300', glow: '#ff5500' },
-  [BlockType.SHIELD]:    { fill: '#051525', stroke: '#00ccff', glow: '#00ccff' },
-  [BlockType.CRYSTAL]:   { fill: '#120b28', stroke: '#cc00ff', glow: '#ee88ff' },
-  [BlockType.BOSS]:      { fill: '#1a0005', stroke: '#ff0044', glow: '#ff0044' },
-  [BlockType.TRIANGLE]:  { fill: '#081a10', stroke: '#00ff88', glow: '#00ff88' },
-  [BlockType.INV_TRI]:   { fill: '#1a0c00', stroke: '#ffaa00', glow: '#ffcc44' },
-  [BlockType.MYSTERY]:   { fill: '#0d0020', stroke: '#bb44ff', glow: '#cc66ff' },
+  [BlockType.NORMAL]:      { fill: '#1a1050', stroke: '#6644ff', glow: '#6644ff' },
+  [BlockType.EXPLOSIVE]:   { fill: '#2a0808', stroke: '#ff3300', glow: '#ff5500' },
+  [BlockType.SHIELD]:      { fill: '#051525', stroke: '#00ccff', glow: '#00ccff' },
+  [BlockType.CRYSTAL]:     { fill: '#120b28', stroke: '#cc00ff', glow: '#ee88ff' },
+  [BlockType.BOSS]:        { fill: '#1a0005', stroke: '#ff0044', glow: '#ff0044' },
+  [BlockType.TRIANGLE]:    { fill: '#081a10', stroke: '#00ff88', glow: '#00ff88' },
+  [BlockType.INV_TRI]:     { fill: '#1a0c00', stroke: '#ffaa00', glow: '#ffcc44' },
+  [BlockType.MYSTERY]:     { fill: '#0d0020', stroke: '#bb44ff', glow: '#cc66ff' },
+  // V6F: laser blocks — solid blocks that fire a beam when destroyed
+  [BlockType.LASER_H]:     { fill: '#200820', stroke: '#ff44cc', glow: '#ff44cc' },
+  [BlockType.LASER_V]:     { fill: '#001828', stroke: '#00ccff', glow: '#00f5ff' },
+  [BlockType.LASER_CROSS]: { fill: '#1e1e00', stroke: '#ffee00', glow: '#ffee44' },
 };
 
 // Mystery effect pools
@@ -503,6 +511,24 @@ class Block {
       spawnParticles(this.cx, this.cy, '#cc66ff', 14, { speed: 5, decay: 0.028, size: 4 });
       game.applyMysteryEffect(this.col, this.row, this.cx, this.cy);
     }
+    // V6F: laser explosion blocks — fire row/col laser on destruction
+    if (this.type === BlockType.LASER_H) {
+      game._fireLaserRow(this.row);
+      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ff44cc', life: 12 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '— LASER!', '#ff44cc'));
+    }
+    if (this.type === BlockType.LASER_V) {
+      game._fireLaserCol(this.col);
+      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#00f5ff', life: 12 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '| LASER!', '#00f5ff'));
+    }
+    if (this.type === BlockType.LASER_CROSS) {
+      game._fireLaserRow(this.row);
+      game._fireLaserCol(this.col);
+      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ffee00', life: 12 });
+      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#ffee00', life: 12 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '+ LASER!', '#ffee00'));
+    }
   }
 
   draw(ctx) {
@@ -591,6 +617,18 @@ class Block {
       ctx.shadowColor = '#bb44ff';
       ctx.shadowBlur = 8;
       ctx.fillText('?', x + blockW / 2, y + blockH / 2);
+    } else if (this.type === BlockType.LASER_H || this.type === BlockType.LASER_V || this.type === BlockType.LASER_CROSS) {
+      const sym = this.type === BlockType.LASER_H ? '—' : this.type === BlockType.LASER_V ? '|' : '+';
+      const symColor = this.type === BlockType.LASER_H ? '#ff44cc' : this.type === BlockType.LASER_V ? '#00f5ff' : '#ffee00';
+      ctx.font = `bold ${blockH > 28 ? 16 : 13}px 'Courier New'`;
+      ctx.fillStyle = flash ? '#fff' : symColor;
+      ctx.shadowColor = symColor;
+      ctx.shadowBlur = 10;
+      ctx.fillText(sym, x + blockW / 2, y + blockH / 2 - 4);
+      ctx.font = `${blockH > 28 ? 9 : 8}px 'Courier New'`;
+      ctx.fillStyle = flash ? '#fff' : 'rgba(255,255,255,0.6)';
+      ctx.shadowBlur = 2;
+      ctx.fillText(this.hp, x + blockW / 2, y + blockH / 2 + 7);
     } else {
       const ratio = this.hp / this.maxHp;
       ctx.font = `bold ${blockH > 28 ? 13 : 10}px 'Courier New'`;
@@ -1377,6 +1415,7 @@ class Game {
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
       mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
+      laserChance:   stage >= 3  ? Math.min(0.18, (stage - 2) * 0.025) : 0,   // laser explosion blocks
       isMilestone,
     };
   }
@@ -1395,6 +1434,7 @@ class Game {
     const isBossThisWave = bal.isMilestone && this.wavesSpawned === 0; // boss only on wave 0
     const triChance     = bal.triChance;
     const mysteryChance = bal.mysteryChance;
+    const laserChance   = bal.laserChance;
 
     // Generate one row of blocks at the top
     for (let col = 0; col < COLS; col++) {
@@ -1407,6 +1447,9 @@ class Game {
         type = BlockType.MYSTERY;
       } else if (triChance > 0 && Math.random() < triChance) {
         type = Math.random() < 0.5 ? BlockType.TRIANGLE : BlockType.INV_TRI;
+      } else if (laserChance > 0 && Math.random() < laserChance) {
+        const pick = Math.random();
+        type = pick < 0.4 ? BlockType.LASER_H : pick < 0.8 ? BlockType.LASER_V : BlockType.LASER_CROSS;
       } else if (rnd < 0.08) {
         type = BlockType.EXPLOSIVE;
       } else if (rnd < 0.16) {
@@ -1465,7 +1508,8 @@ class Game {
     // V4B: Spawn portal pair (stage 6+, max 1 pair alive at a time)
     if (stage >= 6 && this.portals.filter(p => p.alive).length < 1 && Math.random() < 0.15) {
       const colA = randInt(0, 2), colB = randInt(4, COLS - 1);
-      const rowA = randInt(1, 3), rowB = randInt(1, 3);
+      const rowA = randInt(1, 3);
+      const rowB = randItem([1, 2, 3].filter(r => r !== rowA));
       const ax = blockPad + colA * (blockW + blockPad) + blockW / 2;
       const ay = blockPad + rowA * (blockH + blockPad) + blockH / 2;
       const bx = blockPad + colB * (blockW + blockPad) + blockW / 2;
@@ -2595,21 +2639,23 @@ function buildLevelSelectGrid() {
   const grid = document.getElementById('level-grid');
   grid.innerHTML = '';
   const unlocked = saveData.highestUnlockedLevel;
-  for (let i = 1; i <= TOTAL_LEVELS; i++) {
+  // Insert highest level first so level 1 ends up at the bottom (climb upward feel)
+  for (let i = TOTAL_LEVELS; i >= 1; i--) {
     const btn = document.createElement('button');
     btn.className = 'level-btn';
     btn.textContent = i;
+    btn.dataset.level = i;
     const completed  = saveData.completedLevels.includes(i);
     const isUnlocked = i <= unlocked;
     if (completed)        btn.classList.add('level-completed');
     else if (isUnlocked)  btn.classList.add('level-unlocked');
     else { btn.classList.add('level-locked'); btn.disabled = true; }
-    if (isUnlocked) btn.addEventListener('click', () => { game = new Game(i); Screens.show('game'); });
+    if (isUnlocked) btn.addEventListener('click', () => { Screens.show('game'); game = new Game(i); });
     grid.appendChild(btn);
   }
   const progressEl = document.getElementById('ls-progress');
   if (progressEl) progressEl.textContent = saveData.completedLevels.length + ' / ' + TOTAL_LEVELS + ' CLEARED';
-  const currentBtn = grid.children[unlocked - 1];
+  const currentBtn = grid.querySelector('[data-level="' + unlocked + '"]');
   if (currentBtn) setTimeout(() => currentBtn.scrollIntoView({ block: 'center' }), 50);
 }
 
@@ -2812,8 +2858,8 @@ document.getElementById('btn-start').addEventListener('click', () => {
 });
 
 document.getElementById('btn-continue').addEventListener('click', () => {
-  game = new Game(saveData.highestUnlockedLevel);
   Screens.show('game');
+  game = new Game(saveData.highestUnlockedLevel);
 });
 
 document.getElementById('btn-upgrades').addEventListener('click', () => {
@@ -2844,8 +2890,8 @@ document.getElementById('btn-resume').addEventListener('click', () => Screens.sh
 
 document.getElementById('btn-restart-pause').addEventListener('click', () => {
   const lv = game ? game.level : 1;
-  game = new Game(lv);
   Screens.show('game');
+  game = new Game(lv);
 });
 
 document.getElementById('btn-menu-pause').addEventListener('click', () => {
@@ -2855,8 +2901,8 @@ document.getElementById('btn-menu-pause').addEventListener('click', () => {
 
 document.getElementById('btn-restart-go').addEventListener('click', () => {
   const lv = game ? game.level : 1;
-  game = new Game(lv);
   Screens.show('game');
+  game = new Game(lv);
 });
 
 document.getElementById('btn-menu-go').addEventListener('click', () => {
@@ -2884,8 +2930,8 @@ document.getElementById('btn-back-levelselect').addEventListener('click', () => 
 
 document.getElementById('btn-next-level').addEventListener('click', () => {
   const lv = game ? game.level : 1;
-  game = new Game(lv + 1);
   Screens.show('game');
+  game = new Game(lv + 1);
 });
 
 document.getElementById('btn-goto-levelselect').addEventListener('click', () => {
