@@ -11,10 +11,12 @@
 
 const COLS = 7;
 const BALL_SPEED = 9;
-const BALL_RADIUS = 9;
+const BALL_RADIUS = 9;        // collision radius — never change
+const BALL_DRAW_RADIUS = 12;  // visual radius — bigger for readability
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
-const DANGER_ROW = 14;      // blocks past this row = game over
-const WARNING_ROW = DANGER_ROW - 1; // danger warning one row before game over
+// V6D: computed dynamically in resizeCanvas() so the lose line sits near the launcher
+let DANGER_ROW = 14;        // blocks reaching this row → game over
+let WARNING_ROW = 13;       // one row above danger → red flash warning
 const UPGRADE_INTERVAL = 5; // every N stages show upgrade choice
 const BOSS_INTERVAL = 10;   // every N stages add boss block
 const FIRE_DELAY = 55;      // ms between successive ball launches
@@ -318,6 +320,10 @@ function resizeCanvas() {
   blockW = (W - blockPad * (COLS + 1)) / COLS;
   blockH = blockW * 0.55;
   launcherY = H - 48;
+  // V6D: danger line just 1 block-row above the launcher — blocks can come very close
+  const rowH = blockH + blockPad;
+  DANGER_ROW  = Math.max(13, Math.floor((launcherY - blockPad) / rowH) - 1);
+  WARNING_ROW = DANGER_ROW - 1; // one row above lose line = warning flash
 }
 
 // ============================================================
@@ -886,7 +892,10 @@ class Marker {
     this.type = type;
     this.alive = true;
     this.pulse = Math.random() * Math.PI * 2;
-    this.cooldown = 0; // frames before next trigger allowed
+    // V6D: lifecycle tracking — no cooldown; per-ball Set prevents same-ball double-fire
+    this.triggeredBalls = new Set(); // balls that already fired this marker this turn
+    this.usedThisTurn   = false;     // any ball touched → remove at turn end
+    this.triggeredOnce  = false;     // one-shot effects (ball_boost, shuffle) guard
   }
 
   get x()  { return blockPad + this.col * (blockW + blockPad); }
@@ -989,10 +998,13 @@ class Ball {
       }
     }
 
-    // Marker collision — balls pass through but trigger effects (with cooldown)
+    // Marker collision — balls pass through but trigger effects
+    // V6D: each ball can trigger a marker at most once per shot (per-ball Set)
     for (const marker of game.markers) {
-      if (!marker.alive || marker.cooldown > 0) continue;
+      if (!marker.alive) continue;
+      if (marker.triggeredBalls.has(this)) continue; // same ball already fired this marker
       if (this.collidesBlock(marker)) {
+        marker.triggeredBalls.add(this);
         game.triggerMarker(marker, this);
       }
     }
@@ -1120,11 +1132,11 @@ class Ball {
     const bc2 = this.element === 'fire' ? '#ff4400' : this.element === 'ice' ? '#aaeeff' : this.element === 'electric' ? '#8822ff' : '#00f5ff';
     const bc3 = this.element === 'fire' ? '#cc0000' : this.element === 'ice' ? '#0066aa' : this.element === 'electric' ? '#330088' : '#0033cc';
 
-    // Trail
+    // Trail — scaled to BALL_DRAW_RADIUS for visibility
     for (let i = 0; i < this.trail.length; i++) {
       const t = this.trail[i];
       const alpha = (i / this.trail.length) * 0.4;
-      const r = BALL_RADIUS * (i / this.trail.length);
+      const r = BALL_DRAW_RADIUS * (i / this.trail.length);
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = tc;
@@ -1136,17 +1148,20 @@ class Ball {
       ctx.restore();
     }
 
-    // Ball
+    // Ball — drawn at BALL_DRAW_RADIUS (bigger visual, same collision)
     ctx.save();
     ctx.shadowColor = tc;
-    ctx.shadowBlur = 14;
-    const grad = ctx.createRadialGradient(this.x - 2, this.y - 2, 1, this.x, this.y, BALL_RADIUS);
+    ctx.shadowBlur = 16;
+    const grad = ctx.createRadialGradient(
+      this.x - BALL_DRAW_RADIUS * 0.25, this.y - BALL_DRAW_RADIUS * 0.25, 1,
+      this.x, this.y, BALL_DRAW_RADIUS
+    );
     grad.addColorStop(0, '#ffffff');
     grad.addColorStop(0.5, bc2);
     grad.addColorStop(1, bc3);
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, BALL_DRAW_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -1356,7 +1371,8 @@ class Game {
     return {
       blockHp:       Math.min(stage * 0.9 + 1, approxBalls * 1.5 + 2),        // V6C: caps at ~47 HP (30 balls × 1.5)
       milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
-      skipChance:    isMilestone ? 0.08 : Math.max(0.20, 0.40 - stage * 0.015),// V6C: min 20% gaps — keeps rows readable
+      // V6D: early levels start sparse (60% skip = ~3 blocks/row); later levels fill up (25% skip = ~5 blocks)
+      skipChance:    isMilestone ? 0.10 : Math.max(0.25, 0.60 - stage * 0.016),
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
       mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
@@ -1724,53 +1740,73 @@ class Game {
   // ---- Marker trigger ----
 
   triggerMarker(marker, ball) {
-    marker.alive = false; // V6C: one-shot — first ball touch activates and removes it
+    // V6D: marker stays alive during the whole shot — it is NOT removed here.
+    // marker.usedThisTurn = true marks it for removal at processTurnEnd().
+    // Laser markers fire on every ball touch (per-ball dedup handled by triggeredBalls Set).
+    // ball_boost / shuffle fire only once (triggeredOnce guard).
+    marker.usedThisTurn = true;
     const cx = marker.cx, cy = marker.cy;
 
     switch (marker.type) {
-      case 'ball_boost':
-        marker.alive = false;
-        const bonus = Math.random() < 0.35 ? 2 : 1;
-        this.ballCount += bonus;
-        this.updateHUD();
-        spawnParticles(cx, cy, '#00ff88', 14, { speed: 4, decay: 0.025 });
-        floatingTexts.push(new FloatingText(cx, cy - 24, `+${bonus} BALL${bonus > 1 ? 'S' : ''}!`, '#00ff88'));
+      case 'ball_boost': {
+        if (!marker.triggeredOnce) {
+          marker.triggeredOnce = true;
+          const bonus = Math.random() < 0.35 ? 2 : 1;
+          this.ballCount += bonus;
+          this.updateHUD();
+          spawnParticles(cx, cy, '#00ff88', 14, { speed: 4, decay: 0.025 });
+          floatingTexts.push(new FloatingText(cx, cy - 24, `+${bonus} BALL${bonus > 1 ? 'S' : ''}!`, '#00ff88'));
+        }
         break;
+      }
       case 'shuffle': {
-        const alive = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS);
-        const n = Math.min(4, alive.length);
-        if (n >= 2) {
-          const picks = alive.sort(() => Math.random() - 0.5).slice(0, n);
-          const positions = picks.map(b => ({ col: b.col, row: b.row }));
-          positions.sort(() => Math.random() - 0.5);
-          picks.forEach((b, i) => { b.col = positions[i].col; b.row = positions[i].row; });
-          spawnParticles(cx, cy, '#ff8800', 10, { speed: 4, decay: 0.04 });
-          floatingTexts.push(new FloatingText(cx, cy - 24, 'SHUFFLE!', '#ff8800'));
+        if (!marker.triggeredOnce) {
+          marker.triggeredOnce = true;
+          const alive = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS);
+          const n = Math.min(4, alive.length);
+          if (n >= 2) {
+            const picks = alive.sort(() => Math.random() - 0.5).slice(0, n);
+            const positions = picks.map(b => ({ col: b.col, row: b.row }));
+            positions.sort(() => Math.random() - 0.5);
+            picks.forEach((b, i) => { b.col = positions[i].col; b.row = positions[i].row; });
+            spawnParticles(cx, cy, '#ff8800', 10, { speed: 4, decay: 0.04 });
+            floatingTexts.push(new FloatingText(cx, cy - 24, 'SHUFFLE!', '#ff8800'));
+          }
         }
         break;
       }
       case 'laser_h':
+        // Every ball touch damages the row — lightweight beam drawn once per trigger
         this._fireLaserRow(marker.row);
-        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 10 });
-        floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
+        if (!marker.triggeredOnce) {
+          marker.triggeredOnce = true;
+          floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+        }
         break;
       case 'laser_v':
         this._fireLaserCol(marker.col);
-        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 10 });
-        floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
+        if (!marker.triggeredOnce) {
+          marker.triggeredOnce = true;
+          floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+        }
         break;
       case 'laser_cross':
         this._fireLaserRow(marker.row);
         this._fireLaserCol(marker.col);
-        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
-        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 10 });
-        floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 8 });
+        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
+        if (!marker.triggeredOnce) {
+          marker.triggeredOnce = true;
+          floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+        }
         break;
     }
   }
@@ -2090,10 +2126,18 @@ class Game {
     }
     this.firstReturnX = null;
 
-    // Remove dead blocks, orbs, and markers
-    this.blocks = this.blocks.filter(b => b.alive);
-    this.orbs   = this.orbs.filter(o => o.alive);
-    this.markers = this.markers.filter(m => m.alive);
+    // Remove dead blocks, orbs, and used markers
+    // V6D: markers that were triggered this turn (usedThisTurn) are removed here.
+    // Non-triggered markers survive and will descend with the next wave.
+    this.blocks  = this.blocks.filter(b => b.alive);
+    this.orbs    = this.orbs.filter(o => o.alive);
+    this.markers = this.markers.filter(m => m.alive && !m.usedThisTurn);
+    // Reset per-turn state for any surviving markers
+    for (const m of this.markers) {
+      m.triggeredBalls = new Set();
+      m.usedThisTurn   = false;
+      m.triggeredOnce  = false;
+    }
 
     // V4B: Boss action (every 3rd turn while alive)
     const activeBoss = this.blocks.find(b => b.alive && b.type === BlockType.BOSS);
@@ -2301,11 +2345,6 @@ class Game {
   update() {
     if (this.phase !== GamePhase.SHOOTING) return;
 
-    // Tick marker cooldowns
-    for (const marker of this.markers) {
-      if (marker.cooldown > 0) marker.cooldown--;
-    }
-
     for (const ball of this.balls) {
       const wasActive = ball.active;
       ball.update(this);
@@ -2378,9 +2417,20 @@ class Game {
       if (block.alive) block.draw(ctx);
     }
 
-    // Launcher
+    // Launcher + ball count label beneath it
     if (this.phase === GamePhase.IDLE || this.phase === GamePhase.SHOOTING) {
       this.launcher.draw(ctx);
+      // V6D: ball count displayed directly under the cannon barrel tip
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.font = "bold 11px 'Courier New'";
+      ctx.fillStyle = '#00f5ff';
+      ctx.shadowColor = '#00f5ff';
+      ctx.shadowBlur = 8;
+      ctx.globalAlpha = 0.90;
+      ctx.fillText('×' + this.ballCount, this.launcher.x, launcherY + 16);
+      ctx.restore();
     }
 
     // Balls
