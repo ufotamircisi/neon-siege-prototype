@@ -951,40 +951,43 @@ class Marker {
   get cy() { return this.y + blockH / 2; }
 
   // V6C: Ghost-style draw — clearly NOT a block (no solid fill, no HP number, just a glowing symbol)
+  // V7B: one-shot markers (ball_boost, shuffle) draw dimmed once triggeredOnce — shows used state mid-shot
   draw(ctx) {
     if (!this.alive) return;
-    this.pulse += 0.07;
+    const isSpent = this.triggeredOnce && (this.type === 'ball_boost' || this.type === 'shuffle');
+    this.pulse += isSpent ? 0.02 : 0.07; // slow pulse when spent
     const mc = MARKER_COLORS[this.type];
     if (!mc) return;
     const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+    const af = isSpent ? 0.28 : 1.0; // alpha factor
 
     ctx.save();
 
-    // Very faint ghost background (≈10% opacity) — signals "open cell, not a wall"
-    ctx.globalAlpha = 0.10 + glow * 0.06;
+    // Very faint ghost background
+    ctx.globalAlpha = (0.10 + glow * 0.06) * af;
     ctx.fillStyle = mc.fill;
     roundRect(ctx, this.x + 2, this.y + 2, blockW - 4, blockH - 4, 6);
     ctx.fill();
-    ctx.globalAlpha = 1;
 
     // Animated dashed neon border ring
+    ctx.globalAlpha = af;
     ctx.shadowColor = mc.glow;
-    ctx.shadowBlur = 8 + glow * 14;
-    ctx.strokeStyle = hexToRgba(mc.stroke, 0.28 + glow * 0.42);
+    ctx.shadowBlur = isSpent ? 3 : 8 + glow * 14;
+    ctx.strokeStyle = hexToRgba(mc.stroke, (0.28 + glow * 0.42) * af);
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 5]);
     roundRect(ctx, this.x + 3, this.y + 3, blockW - 6, blockH - 6, 5);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Large bright symbol — the only label; no HP number ever shown here
-    ctx.shadowBlur = 6 + glow * 12;
-    ctx.fillStyle = mc.stroke;
-    ctx.globalAlpha = 0.80 + glow * 0.20;
+    // Symbol — show '✓' for spent one-shot markers, original label otherwise
+    ctx.shadowBlur = isSpent ? 2 : 6 + glow * 12;
+    ctx.fillStyle = isSpent ? 'rgba(180,180,180,0.55)' : mc.stroke;
+    ctx.globalAlpha = isSpent ? 0.40 : (0.80 + glow * 0.20);
     ctx.font = `bold ${blockH > 28 ? 19 : 15}px 'Courier New'`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(mc.label, this.cx, this.cy);
+    ctx.fillText(isSpent ? '✓' : mc.label, this.cx, this.cy);
 
     ctx.restore();
   }
@@ -1221,7 +1224,8 @@ class Ball {
 class Launcher {
   constructor() {
     this.x = W / 2;
-    this.angle = -Math.PI / 2; // straight up
+    this.angle       = -Math.PI / 2; // current displayed angle (lerped)
+    this.targetAngle = -Math.PI / 2; // V7B: pointer sets this; draw follows smoothly
     this.minAngle = -Math.PI + 0.18;
     this.maxAngle = -0.18;
   }
@@ -1232,7 +1236,22 @@ class Launcher {
     let a = Math.atan2(dy, dx);
     // clamp: only allow upward angles
     a = clamp(a, this.minAngle, this.maxAngle);
-    this.angle = a;
+    this.targetAngle = a; // V7B: drive the smooth follower, not angle directly
+  }
+
+  // V7B: smooth follow — called every frame; gives mobile-shooter "springy" feel
+  update() {
+    const diff = this.targetAngle - this.angle;
+    if (Math.abs(diff) < 0.0015) {
+      this.angle = this.targetAngle; // snap when negligibly close (prevents jitter)
+    } else {
+      this.angle = lerp(this.angle, this.targetAngle, 0.30);
+    }
+  }
+
+  // V7B: instant snap just before firing — shot always goes exactly where aimed
+  snapToTarget() {
+    this.angle = this.targetAngle;
   }
 
   draw(ctx) {
@@ -1620,6 +1639,7 @@ class Game {
 
   shoot() {
     if (this.phase !== GamePhase.IDLE) return;
+    this.launcher.snapToTarget(); // V7B: commit exact aim before balls fly
     this.phase = GamePhase.SHOOTING;
     this.firstHitThisTurn = true;
     this.iceEchoUsed = false;
@@ -2429,6 +2449,9 @@ class Game {
   // ---- Update loop ----
 
   update() {
+    // V7B: smooth launcher angle every frame so aiming feels responsive, not snapped
+    if (this.launcher) this.launcher.update();
+
     if (this.phase !== GamePhase.SHOOTING) return;
 
     for (const ball of this.balls) {
