@@ -12,7 +12,7 @@
 const COLS = 7;
 const BALL_SPEED = 9;
 const BALL_RADIUS = 9;        // collision radius — never change
-const BALL_DRAW_RADIUS = 12;  // visual radius — bigger for readability
+const BALL_DRAW_RADIUS = 13;  // visual radius — slightly bigger for readability
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
 // V6D: computed dynamically in resizeCanvas() so the lose line sits near the launcher
 let DANGER_ROW = 14;        // blocks reaching this row → game over
@@ -165,14 +165,15 @@ const Save = {
         }
         if (!d.achievements) d.achievements = {};
         // V6D: level progress migration
-        if (!d.highestUnlockedLevel) d.highestUnlockedLevel = 1;
-        if (!d.completedLevels)      d.completedLevels = [];
-        if (!d.levelBestScore)       d.levelBestScore = {};
+        if (!d.highestUnlockedLevel)          d.highestUnlockedLevel = 1;
+        if (!d.completedLevels)               d.completedLevels = [];
+        if (!d.levelBestScore)                d.levelBestScore = {};
+        if (!('pendingMilestonePowers' in d)) d.pendingMilestonePowers = 0;
         return d;
       }
     } catch(e) {}
     return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
-             highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {} };
+             highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0 };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -321,9 +322,9 @@ function resizeCanvas() {
   blockW = (W - blockPad * (COLS + 1)) / COLS;
   blockH = blockW * 0.55;
   launcherY = H - 48;
-  // V6D: danger line just 1 block-row above the launcher — blocks can come very close
+  // V7: danger line sits one block-row lower — blocks can come even closer to the cannon
   const rowH = blockH + blockPad;
-  DANGER_ROW  = Math.max(13, Math.floor((launcherY - blockPad) / rowH) - 1);
+  DANGER_ROW  = Math.max(13, Math.floor((launcherY - blockPad) / rowH));
   WARNING_ROW = DANGER_ROW - 1; // one row above lose line = warning flash
 }
 
@@ -848,6 +849,7 @@ class BallOrb {
     this.col = col;
     this.row = row;
     this.alive = true;
+    this.used  = false; // V7: reward given once; stays visible (dimmed) until turn end
     this.pulse = Math.random() * Math.PI * 2;
   }
 
@@ -856,8 +858,9 @@ class BallOrb {
   get radius() { return Math.min(blockW, blockH) * 0.30; }
 
   collect(game) {
-    if (!this.alive) return;
-    this.alive = false;
+    if (!this.alive || this.used) return;
+    // V7: mark used so reward fires once, but orb stays visible until shot ends
+    this.used = true;
     game.ballCount++;
     game.updateHUD();
     spawnParticles(this.x, this.y, '#00f5ff', 14, { speed: 4, decay: 0.028, size: 3 });
@@ -875,19 +878,24 @@ class BallOrb {
 
   draw(ctx) {
     if (!this.alive) return;
-    this.pulse += 0.075;
+    this.pulse += this.used ? 0.02 : 0.075;
     const r = this.radius;
     const glow = 0.5 + 0.5 * Math.sin(this.pulse);
+    // V7: dim the orb once used — reward already granted, but keep it visible until turn ends
+    const alpha = this.used ? 0.28 : 1.0;
 
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.shadowColor = '#00f5ff';
-    ctx.shadowBlur = 10 + glow * 14;
+    ctx.shadowBlur = this.used ? 4 : 10 + glow * 14;
 
-    // Pulsing outer ring
-    ctx.strokeStyle = `rgba(0,245,255,${0.4 + glow * 0.45})`;
+    // Outer ring — static when used
+    ctx.strokeStyle = this.used
+      ? 'rgba(0,245,255,0.25)'
+      : `rgba(0,245,255,${0.4 + glow * 0.45})`;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, r + 3 + glow * 3, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, r + (this.used ? 2 : 3 + glow * 3), 0, Math.PI * 2);
     ctx.stroke();
 
     // Orb body gradient
@@ -895,21 +903,21 @@ class BallOrb {
       this.x - r * 0.3, this.y - r * 0.35, 1,
       this.x, this.y, r
     );
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.35, '#00f5ff');
-    grad.addColorStop(1, '#6600cc');
+    grad.addColorStop(0, this.used ? '#446688' : '#ffffff');
+    grad.addColorStop(0.35, this.used ? '#004466' : '#00f5ff');
+    grad.addColorStop(1, '#220044');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // "+1" label
+    // Label: "✓" when used, "+1" when fresh
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = this.used ? 'rgba(0,200,200,0.7)' : '#ffffff';
     ctx.font = `bold ${Math.max(9, Math.floor(r * 0.85))}px 'Courier New'`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('+1', this.x, this.y);
+    ctx.fillText(this.used ? '✓' : '+1', this.x, this.y);
     ctx.restore();
   }
 }
@@ -1027,9 +1035,9 @@ class Ball {
       }
     }
 
-    // Orb collision — collect on touch
+    // Orb collision — collect on touch (V7: skip already-used orbs)
     for (const orb of game.orbs) {
-      if (!orb.alive) continue;
+      if (!orb.alive || orb.used) continue;
       const odx = this.x - orb.x, ody = this.y - orb.y;
       const minDist = BALL_RADIUS + orb.radius;
       if (odx * odx + ody * ody < minDist * minDist) {
@@ -1229,40 +1237,64 @@ class Launcher {
 
   draw(ctx) {
     const lx = this.x, ly = launcherY;
-    const len = 38;
+    const len = 40;
     const ex = lx + Math.cos(this.angle) * len;
     const ey = ly + Math.sin(this.angle) * len;
 
-    // Base platform
     ctx.save();
     ctx.shadowColor = '#00f5ff';
-    ctx.shadowBlur = 16;
-    const grad = ctx.createLinearGradient(lx - 18, ly, lx + 18, ly);
-    grad.addColorStop(0, '#003366');
-    grad.addColorStop(0.5, '#0099ff');
-    grad.addColorStop(1, '#003366');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.ellipse(lx, ly + 6, 22, 10, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.shadowBlur = 18;
 
-    // Barrel
+    // Base platform — stays level, acts as the fixed mount
+    const bGrad = ctx.createLinearGradient(lx - 24, ly, lx + 24, ly);
+    bGrad.addColorStop(0, '#001e3a');
+    bGrad.addColorStop(0.5, '#0077cc');
+    bGrad.addColorStop(1, '#001e3a');
+    ctx.fillStyle = bGrad;
+    ctx.beginPath();
+    ctx.ellipse(lx, ly + 7, 24, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 4;
+    ctx.strokeStyle = '#00aaff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Turret body — rotates visibly with aim angle (the tilt effect)
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(this.angle);
+    const tGrad = ctx.createLinearGradient(0, -6, 0, 6);
+    tGrad.addColorStop(0, '#00bbff');
+    tGrad.addColorStop(1, '#002255');
+    ctx.fillStyle = tGrad;
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 10;
+    roundRect(ctx, 2, -5, 26, 10, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#00ddff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Barrel line — glowing cyan
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 14;
     ctx.strokeStyle = '#00f5ff';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(lx, ly);
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
-    // Tip glow
-    ctx.shadowBlur = 20;
+    // Tip glow dot
+    ctx.shadowBlur = 26;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(ex, ey, 4, 0, Math.PI * 2);
+    ctx.arc(ex, ey, 4.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
 
+    ctx.restore();
   }
 }
 
@@ -1326,9 +1358,11 @@ class Game {
     // Mystery guard (prevent recursive mystery effects)
     this.mysteryProcessing = false;
 
-    // Powers (V6B)
-    this.powBomb     = 3;   // left button — bomb (bottom 3 rows)
-    this.powMult     = 3;   // right button — 10x ball multiplier
+    // Powers (V6B) — V7: consume any pending milestone bonus earned from last level clear
+    const _mPow = saveData.pendingMilestonePowers || 0;
+    if (_mPow > 0) { saveData.pendingMilestonePowers = 0; Save.save(saveData); }
+    this.powBomb = 3 + _mPow;   // left button — bomb (bottom 3 rows)
+    this.powMult = 3 + _mPow;   // right button — 10x ball multiplier
     this.ballMultActive = false;
     this.shotId      = 0;   // incremented each shoot(); recall uses this to cancel queued launches
 
@@ -1410,8 +1444,8 @@ class Game {
     return {
       blockHp:       Math.min(stage * 0.9 + 1, approxBalls * 1.5 + 2),        // V6C: caps at ~47 HP (30 balls × 1.5)
       milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
-      // V6D: early levels start sparse (60% skip = ~3 blocks/row); later levels fill up (25% skip = ~5 blocks)
-      skipChance:    isMilestone ? 0.10 : Math.max(0.25, 0.60 - stage * 0.016),
+      // V7: early levels very sparse (65% skip ≈ 2-3 blocks/row); later levels fill up (28% skip ≈ 5 blocks)
+      skipChance:    isMilestone ? 0.12 : Math.max(0.28, 0.65 - stage * 0.015),
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
       mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
@@ -2175,7 +2209,7 @@ class Game {
     // V6D: markers that were triggered this turn (usedThisTurn) are removed here.
     // Non-triggered markers survive and will descend with the next wave.
     this.blocks  = this.blocks.filter(b => b.alive);
-    this.orbs    = this.orbs.filter(o => o.alive);
+    this.orbs    = this.orbs.filter(o => o.alive && !o.used); // V7: remove used orbs at turn end
     this.markers = this.markers.filter(m => m.alive && !m.usedThisTurn);
     // Reset per-turn state for any surviving markers
     for (const m of this.markers) {
@@ -2356,7 +2390,14 @@ class Game {
     document.getElementById('lc-score').textContent  = this.score;
     document.getElementById('lc-shards').textContent = shardsEarned;
     const isMilestone = lv % BOSS_INTERVAL === 0;
-    document.getElementById('lc-bonus').textContent  = isMilestone ? '★ MILESTONE BONUS!' : '';
+    if (isMilestone) {
+      // V7: grant +1 bomb and +1 ×10 mult for the NEXT game started
+      saveData.pendingMilestonePowers = Math.min((saveData.pendingMilestonePowers || 0) + 1, 3);
+      Save.save(saveData);
+      document.getElementById('lc-bonus').textContent = '★ MILESTONE REWARD: +1 BOMB  +1 ×10 MULT!';
+    } else {
+      document.getElementById('lc-bonus').textContent = '';
+    }
     Screens.show('levelcomplete');
   }
 
@@ -2465,16 +2506,16 @@ class Game {
     // Launcher + ball count label beneath it
     if (this.phase === GamePhase.IDLE || this.phase === GamePhase.SHOOTING) {
       this.launcher.draw(ctx);
-      // V6E: compact ball count label just below cannon tip — acts as a quick-glance indicator
+      // V7: "BALLS ×N" label just below cannon tip
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.globalAlpha = 0.82;
+      ctx.globalAlpha = 0.85;
       ctx.shadowColor = '#00f5ff';
       ctx.shadowBlur = 10;
       ctx.fillStyle = '#00f5ff';
-      ctx.font = "bold 10px 'Courier New'";
-      ctx.fillText('\xd7' + this.ballCount, this.launcher.x, launcherY + 18);
+      ctx.font = "bold 9px 'Courier New'";
+      ctx.fillText('BALLS \xd7' + this.ballCount, this.launcher.x, launcherY + 20);
       ctx.restore();
     }
 
@@ -2650,6 +2691,8 @@ function buildLevelSelectGrid() {
     if (completed)        btn.classList.add('level-completed');
     else if (isUnlocked)  btn.classList.add('level-unlocked');
     else { btn.classList.add('level-locked'); btn.disabled = true; }
+    // V7: milestone levels (10, 20, 30...) get a special gift-box visual
+    if (i % 10 === 0) btn.classList.add('level-milestone');
     if (isUnlocked) btn.addEventListener('click', () => { Screens.show('game'); game = new Game(i); });
     grid.appendChild(btn);
   }

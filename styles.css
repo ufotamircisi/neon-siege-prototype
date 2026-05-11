@@ -915,6 +915,7 @@ html, body {
 }
 
 .level-btn {
+  position: relative;
   width: calc(20% - 7px);
   aspect-ratio: 1;
   border-radius: 10px;
@@ -928,7 +929,7 @@ html, body {
   justify-content: center;
   color: var(--text);
   background: none;
-  transition: transform 0.12s;
+  transition: transform 0.12s, box-shadow 0.12s;
 }
 
 .level-btn.level-locked {
@@ -954,6 +955,54 @@ html, body {
 .level-btn.level-unlocked:hover,
 .level-btn.level-completed:hover {
   transform: scale(1.08);
+}
+
+/* ---- Milestone levels (10, 20, 30 ...) — gold gift-package look ---- */
+.level-btn.level-milestone {
+  border-color: #cc9900;
+  background: radial-gradient(circle at 50% 38%, rgba(44,32,0,0.97), rgba(14,10,0,0.98));
+  box-shadow: 0 0 10px rgba(255,204,0,0.35), inset 0 0 8px rgba(255,190,0,0.08);
+  color: #ffdd44;
+  font-size: 12px;
+}
+/* Horizontal ribbon stripe */
+.level-btn.level-milestone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background:
+    linear-gradient(transparent 42%, rgba(255,200,0,0.14) 42%, rgba(255,200,0,0.14) 58%, transparent 58%),
+    linear-gradient(90deg, transparent 42%, rgba(255,200,0,0.14) 42%, rgba(255,200,0,0.14) 58%, transparent 58%);
+  pointer-events: none;
+}
+/* Star badge top-right */
+.level-btn.level-milestone::after {
+  content: '★';
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 8px;
+  color: #ffcc44;
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(255,204,0,0.8);
+  pointer-events: none;
+}
+.level-btn.level-milestone.level-completed {
+  border-color: #ffcc00;
+  background: radial-gradient(circle at 50% 38%, rgba(44,34,0,0.92), rgba(14,10,0,0.95));
+  box-shadow: 0 0 16px rgba(255,210,0,0.50), inset 0 0 10px rgba(255,200,0,0.10);
+  color: #ffee55;
+}
+.level-btn.level-milestone.level-locked {
+  border-color: rgba(180,140,0,0.3);
+  background: rgba(255,200,0,0.03);
+  color: rgba(255,200,0,0.25);
+  box-shadow: none;
+}
+.level-btn.level-milestone:not(.level-locked):hover {
+  transform: scale(1.10);
+  box-shadow: 0 0 22px rgba(255,210,0,0.55);
 }
 
 .ls-back-btn {
