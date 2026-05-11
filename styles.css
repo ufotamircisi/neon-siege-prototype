@@ -375,6 +375,16 @@ html, body {
 }
 .pow-mult-btn:not(:disabled):active { transform: scale(0.90); }
 
+/* Armed state — pulsing gold glow when ×10 is queued for next shot */
+.pow-mult-btn.armed {
+  border-color: #ffcc00;
+  animation: armed-pulse 0.75s ease-in-out infinite;
+}
+@keyframes armed-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(255,204,0,0.75), inset 0 0 14px rgba(255,204,0,0.18); }
+  50%       { box-shadow: 0 0 36px rgba(255,220,0,1.00), inset 0 0 20px rgba(255,220,0,0.30); }
+}
+
 .power-btn:disabled {
   opacity: 0.20;
   cursor: not-allowed;

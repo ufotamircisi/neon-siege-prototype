@@ -1383,6 +1383,7 @@ class Game {
     this.powBomb = 3 + _mPow;   // left button — bomb (bottom 3 rows)
     this.powMult = 3 + _mPow;   // right button — 10x ball multiplier
     this.ballMultActive = false;
+    this.lastShotAngle = null; // captured at fire time for mid-shot ×10 burst
     this.shotId      = 0;   // incremented each shoot(); recall uses this to cancel queued launches
 
     // Game objects
@@ -1679,6 +1680,7 @@ class Game {
     const lx = this.launcher.x;
     const ly = launcherY;
     const angle = this.launcher.angle;
+    this.lastShotAngle = angle; // stored for mid-shot ×10 burst
     const spd = BALL_SPEED;
 
     let launched = 0;
@@ -1938,7 +1940,8 @@ class Game {
 
   // V6B: Bomb — damages the bottom 3 block rows (closest to danger line)
   useBomb() {
-    if (this.phase !== GamePhase.IDLE || this.powBomb <= 0) return;
+    if (this.phase !== GamePhase.IDLE && this.phase !== GamePhase.SHOOTING) return;
+    if (this.powBomb <= 0) return;
     this.powBomb--;
     this.turnPowerUsed = true;
     this.updatePowerBar();
@@ -1959,14 +1962,37 @@ class Game {
     }
   }
 
-  // V6B: 10x Ball Multiplier — next shot fires 10× current ball count (one shot only)
+  // V6B: 10x Ball Multiplier — arms next shot (IDLE) or fires extra burst immediately (SHOOTING)
   useMult() {
-    if (this.phase !== GamePhase.IDLE || this.powMult <= 0 || this.ballMultActive) return;
-    this.powMult--;
-    this.turnPowerUsed = true;
-    this.ballMultActive = true;
-    this.updatePowerBar();
-    floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
+    if (this.powMult <= 0) return;
+    if (this.phase === GamePhase.IDLE && !this.ballMultActive) {
+      this.powMult--;
+      this.turnPowerUsed = true;
+      this.ballMultActive = true;
+      this.updatePowerBar();
+      floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
+    } else if (this.phase === GamePhase.SHOOTING && this.lastShotAngle !== null) {
+      this.powMult--;
+      this.turnPowerUsed = true;
+      this.updatePowerBar();
+      const totalExtra = Math.min(this.ballCount * 10, 300);
+      this.pendingBalls += totalExtra;
+      const currentShotId = this.shotId;
+      const angle = this.lastShotAngle;
+      const lx = this.launcher.x, ly = launcherY, spd = BALL_SPEED;
+      const piercing = this.hasUpgrade('piercing') ? 3 : 0;
+      let launched = 0;
+      const launchNext = () => {
+        if (launched >= totalExtra || this.shotId !== currentShotId) return;
+        this.balls.push(new Ball(lx, ly, Math.cos(angle) * spd, Math.sin(angle) * spd, { piercingLeft: piercing }));
+        launched++;
+        this.pendingBalls--;
+        if (launched < totalExtra) setTimeout(launchNext, Math.max(8, FIRE_DELAY >> 2));
+      };
+      launchNext();
+      floatingTexts.push(new FloatingText(W / 2, H * 0.4, '×10 BURST!', '#ffee00'));
+      screenShake(4, 3);
+    }
   }
 
   // V6B: Recall — instantly deactivates all flying balls and ends the turn
@@ -2438,10 +2464,13 @@ class Game {
 
   updatePowerBar() {
     // V6B: left = bomb, right = 10x multiplier
+    const activePhase = this.phase === GamePhase.IDLE || this.phase === GamePhase.SHOOTING;
     document.getElementById('pow-lightning-count').textContent = this.powBomb;
-    document.getElementById('pow-bomb-count').textContent      = this.ballMultActive ? '✓' : this.powMult;
-    document.getElementById('btn-lightning').disabled = (this.powBomb <= 0 || this.phase !== GamePhase.IDLE);
-    document.getElementById('btn-bomb').disabled      = (this.powMult <= 0 || this.phase !== GamePhase.IDLE || this.ballMultActive);
+    document.getElementById('pow-bomb-count').textContent = this.ballMultActive ? '✓' : this.powMult;
+    document.getElementById('btn-lightning').disabled = (this.powBomb <= 0 || !activePhase);
+    const multBtn = document.getElementById('btn-bomb');
+    multBtn.disabled = (this.powMult <= 0 || !activePhase || (this.phase === GamePhase.IDLE && this.ballMultActive));
+    multBtn.classList.toggle('armed', this.ballMultActive);
     const recallBtn = document.getElementById('btn-recall');
     if (recallBtn) recallBtn.disabled = (this.phase !== GamePhase.SHOOTING);
   }
