@@ -306,7 +306,8 @@ let launcherY = 0;
 function resizeCanvas() {
   const parent = canvas.parentElement;
   const availW = Math.min(parent.clientWidth, 480);
-  const availH = parent.clientHeight - 60; // hud + power bar
+  // V6E: subtract HUD (~48px) + redesigned power bar (~80px) so canvas never overflows
+  const availH = parent.clientHeight - 128;
 
   // Force portrait
   W = availW;
@@ -2420,16 +2421,16 @@ class Game {
     // Launcher + ball count label beneath it
     if (this.phase === GamePhase.IDLE || this.phase === GamePhase.SHOOTING) {
       this.launcher.draw(ctx);
-      // V6D: ball count displayed directly under the cannon barrel tip
+      // V6E: compact ball count label just below cannon tip — acts as a quick-glance indicator
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.font = "bold 11px 'Courier New'";
-      ctx.fillStyle = '#00f5ff';
+      ctx.globalAlpha = 0.82;
       ctx.shadowColor = '#00f5ff';
-      ctx.shadowBlur = 8;
-      ctx.globalAlpha = 0.90;
-      ctx.fillText('×' + this.ballCount, this.launcher.x, launcherY + 16);
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#00f5ff';
+      ctx.font = "bold 10px 'Courier New'";
+      ctx.fillText('\xd7' + this.ballCount, this.launcher.x, launcherY + 18);
       ctx.restore();
     }
 
