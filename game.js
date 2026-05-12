@@ -1209,6 +1209,7 @@ class Ball {
     this.active = true;
     this.returning = false;      // true while sliding along bottom toward cannon
     this.collectTargetX = null;  // X to slide toward during return
+    this.returningFrames = 0;    // safety counter — force-collect after timeout
     this.piercingLeft = opts.piercingLeft || 0;
     this.element = opts.element || null;
     this.portalCooldown = 0;
@@ -1239,15 +1240,20 @@ class Ball {
       this.vy = 0;
     }
     if (this.returning) {
+      this.returningFrames++;
       if (this.collectTargetX !== null) {
         const dx = this.collectTargetX - this.x;
-        if (Math.abs(dx) < 4) {
+        if (Math.abs(dx) < 2) {
+          this.x = this.collectTargetX;
           this.active = false; // absorbed into cannon
         } else {
-          this.x += Math.sign(dx) * Math.min(14, Math.abs(dx) * 0.5 + 7);
+          // No-overshoot easing: step is always <= |dx| so ball never oscillates past target
+          const step = Math.min(Math.abs(dx), Math.max(9, Math.abs(dx) * 0.3));
+          this.x += Math.sign(dx) * step;
         }
       }
-      // collectTargetX null → wait at bottom; target assigned next frame by Game.update
+      // Safety: force-collect after 4 seconds (240 frames) so turn never soft-locks
+      if (this.returningFrames > 240) this.active = false;
       return;
     }
 
@@ -2832,13 +2838,14 @@ class Game {
         this.firstReturnX = ball.x;
       }
     }
-    // Assign collect target to all balls now in returning state
-    if (this.firstReturnX !== null) {
-      const tX = clamp(this.firstReturnX, BALL_RADIUS + 12, W - BALL_RADIUS - 12);
-      for (const ball of this.balls) {
-        if (ball.returning && ball.collectTargetX === null) {
-          ball.collectTargetX = tX;
-        }
+    // Assign collect target to all returning balls.
+    // firstReturnX is set the frame the first ball lands; fall back to cannon X if somehow still null.
+    const _retTarget = this.firstReturnX !== null
+      ? clamp(this.firstReturnX, BALL_RADIUS + 12, W - BALL_RADIUS - 12)
+      : (this.launcher ? clamp(this.launcher.x, BALL_RADIUS + 12, W - BALL_RADIUS - 12) : W / 2);
+    for (const ball of this.balls) {
+      if (ball.returning && ball.collectTargetX === null) {
+        ball.collectTargetX = _retTarget;
       }
     }
 
