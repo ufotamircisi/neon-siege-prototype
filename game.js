@@ -12,14 +12,14 @@
 const COLS = 7;
 const BALL_SPEED = 9;
 const BALL_RADIUS = 9;        // collision radius — never change
-const BALL_DRAW_RADIUS = 15;  // visual radius — bigger for mobile readability (collision stays 9)
+const BALL_DRAW_RADIUS = 11;  // visual radius — reduced for cleaner multi-ball display (collision stays 9)
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
 // V6D: computed dynamically in resizeCanvas() so the lose line sits near the launcher
 let DANGER_ROW = 14;        // blocks reaching this row → game over
 let WARNING_ROW = 13;       // one row above danger → red flash warning
 const UPGRADE_INTERVAL = 5; // every N stages show upgrade choice
 const BOSS_INTERVAL = 10;   // every N stages add boss block
-const FIRE_DELAY = 55;      // ms between successive ball launches
+const FIRE_DELAY = 90;      // ms between successive ball launches
 const MAX_ORBS = 2;         // max ball-pickup orbs on board simultaneously
 const ORB_SPAWN_CHANCE = 0.22; // probability of orb spawn per stage
 const TOTAL_LEVELS = 100;   // V6D: total generated levels
@@ -716,23 +716,23 @@ class Block {
       spawnParticles(this.cx, this.cy, '#cc66ff', 14, { speed: 5, decay: 0.028, size: 4 });
       game.applyMysteryEffect(this.col, this.row, this.cx, this.cy);
     }
-    // V6F: laser explosion blocks — fire row/col laser on destruction
+    // V6F: laser explosion blocks — clear entire row/col on destruction
     if (this.type === BlockType.LASER_H) {
-      game._fireLaserRow(this.row);
-      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ff44cc', life: 12 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '— LASER!', '#ff44cc'));
+      game._clearRow(this.row);
+      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ff44cc', life: 16 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '— ROW CLEAR!', '#ff44cc'));
     }
     if (this.type === BlockType.LASER_V) {
-      game._fireLaserCol(this.col);
-      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#00f5ff', life: 12 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '| LASER!', '#00f5ff'));
+      game._clearCol(this.col);
+      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#00f5ff', life: 16 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '| COL CLEAR!', '#00f5ff'));
     }
     if (this.type === BlockType.LASER_CROSS) {
-      game._fireLaserRow(this.row);
-      game._fireLaserCol(this.col);
-      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ffee00', life: 12 });
-      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#ffee00', life: 12 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '+ LASER!', '#ffee00'));
+      game._clearRow(this.row);
+      game._clearCol(this.col);
+      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ffee00', life: 16 });
+      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#ffee00', life: 16 });
+      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '+ CROSS CLEAR!', '#ffee00'));
     }
   }
 
@@ -1207,6 +1207,8 @@ class Ball {
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.active = true;
+    this.returning = false;      // true while sliding along bottom toward cannon
+    this.collectTargetX = null;  // X to slide toward during return
     this.piercingLeft = opts.piercingLeft || 0;
     this.element = opts.element || null;
     this.portalCooldown = 0;
@@ -1229,9 +1231,23 @@ class Ball {
     if (this.x + BALL_RADIUS > W) { this.x = W - BALL_RADIUS; this.vx = -Math.abs(this.vx); }
     if (this.y - BALL_RADIUS < 0) { this.y = BALL_RADIUS; this.vy = Math.abs(this.vy); }
 
-    // Left bottom — deactivate
-    if (this.y > H + BALL_RADIUS * 2) {
-      this.active = false;
+    // Bottom boundary — begin return animation toward cannon
+    if (!this.returning && this.y + BALL_RADIUS >= H) {
+      this.returning = true;
+      this.y = H - BALL_RADIUS;
+      this.vx = 0;
+      this.vy = 0;
+    }
+    if (this.returning) {
+      if (this.collectTargetX !== null) {
+        const dx = this.collectTargetX - this.x;
+        if (Math.abs(dx) < 4) {
+          this.active = false; // absorbed into cannon
+        } else {
+          this.x += Math.sign(dx) * Math.min(14, Math.abs(dx) * 0.5 + 7);
+        }
+      }
+      // collectTargetX null → wait at bottom; target assigned next frame by Game.update
       return;
     }
 
@@ -1386,6 +1402,20 @@ class Ball {
 
   draw(ctx) {
     if (!this.active) return;
+
+    // Returning: small glowing orb sliding along the bottom toward cannon
+    if (this.returning) {
+      ctx.save();
+      ctx.globalAlpha = 0.82;
+      ctx.shadowColor = '#00f5ff';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#00f5ff';
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, BALL_DRAW_RADIUS * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
 
     const tc  = this.element === 'fire' ? '#ff6600' : this.element === 'ice' ? '#00ccff' : this.element === 'electric' ? '#aa44ff' : '#00f5ff';
     const bc2 = this.element === 'fire' ? '#ff4400' : this.element === 'ice' ? '#aaeeff' : this.element === 'electric' ? '#8822ff' : '#00f5ff';
@@ -1620,8 +1650,8 @@ class Game {
     this.turnLaserUsed    = false;
     this.turnElectricUsed = false;
 
-    // Spawn first stage
-    this.spawnStageBlocks();
+    // Initialize level layout (row 0 empty; pre-populated rows for higher levels)
+    this._initLevelLayout();
 
     this.updateHUD();
     this.updatePowerBar();
@@ -1674,9 +1704,9 @@ class Game {
       // V8: early levels very sparse (70% skip ≈ 2 blocks/row); later levels fill up (28% skip ≈ 5 blocks)
       skipChance:    isMilestone ? 0.12 : Math.max(0.28, 0.70 - stage * 0.018),
       triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
-      mysteryChance: stage >= 3  ? Math.min(0.12, (stage - 2) * 0.018) : 0,   // mystery blocks
+      mysteryChance: stage >= 4  ? Math.min(0.07, (stage - 3) * 0.010) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
-      laserChance:   stage >= 3  ? Math.min(0.18, (stage - 2) * 0.025) : 0,   // laser explosion blocks
+      laserChance:   stage >= 5  ? Math.min(0.08, (stage - 4) * 0.012) : 0,   // laser explosion blocks
       isMilestone,
     };
   }
@@ -1685,6 +1715,47 @@ class Game {
     const bal       = this.stageBalance(stage);
     const relicMult = this.hasRelic('siege_engine') ? 1.12 : 1.0;
     return Math.max(1, Math.ceil(bal.blockHp * bal.milestoneMult * relicMult));
+  }
+
+  _initLevelLayout() {
+    this.spawnStageBlocks(); // spawn first wave (always at row 1 — row 0 stays empty)
+    // Pre-populate extra rows for higher levels so the board feels full
+    const extraRows = Math.min(Math.floor((this.level - 1) / 8), 3);
+    for (let r = 0; r < extraRows; r++) {
+      this._spawnRowAtPosition(r + 2);
+    }
+  }
+
+  _spawnRowAtPosition(targetRow) {
+    if (this.wavesSpawned >= this.maxWaves) return;
+    const stage = this.level;
+    const bal   = this.stageBalance(stage);
+    const hp    = this.blockHpForStage(stage);
+    const numGaps = stage <= 8 ? 2 : 1;
+    const gapCols = new Set();
+    while (gapCols.size < numGaps) gapCols.add(randInt(0, COLS - 1));
+    for (let col = 0; col < COLS; col++) {
+      if (gapCols.has(col)) continue;
+      const rnd = Math.random();
+      let type = BlockType.NORMAL;
+      if (bal.laserChance > 0 && Math.random() < bal.laserChance) {
+        const pick = Math.random();
+        type = pick < 0.4 ? BlockType.LASER_H : pick < 0.8 ? BlockType.LASER_V : BlockType.LASER_CROSS;
+      } else if (bal.mysteryChance > 0 && Math.random() < bal.mysteryChance) {
+        type = BlockType.MYSTERY;
+      } else if (bal.triChance > 0 && Math.random() < bal.triChance) {
+        type = Math.random() < 0.5 ? BlockType.TRIANGLE : BlockType.INV_TRI;
+      } else if (rnd < 0.05) {
+        type = BlockType.EXPLOSIVE;
+      } else if (rnd < 0.10) {
+        type = BlockType.SHIELD;
+      } else if (rnd < 0.15) {
+        type = BlockType.CRYSTAL;
+      }
+      if (type === BlockType.NORMAL && Math.random() < bal.skipChance) continue;
+      this.blocks.push(new Block(col, targetRow, type, hp));
+    }
+    this.wavesSpawned++;
   }
 
   spawnStageBlocks() {
@@ -1698,7 +1769,12 @@ class Game {
     const laserChance   = bal.laserChance;
 
     // Generate one row of blocks at the top
+    const numGaps = stage <= 8 ? 2 : 1;
+    const gapCols = new Set();
+    while (gapCols.size < numGaps) gapCols.add(randInt(0, COLS - 1));
+
     for (let col = 0; col < COLS; col++) {
+      if (gapCols.has(col) && !isBossThisWave) continue; // corridor gap
       const rnd = Math.random();
       let type = BlockType.NORMAL;
 
@@ -1711,11 +1787,11 @@ class Game {
       } else if (laserChance > 0 && Math.random() < laserChance) {
         const pick = Math.random();
         type = pick < 0.4 ? BlockType.LASER_H : pick < 0.8 ? BlockType.LASER_V : BlockType.LASER_CROSS;
-      } else if (rnd < 0.08) {
+      } else if (rnd < 0.05) {
         type = BlockType.EXPLOSIVE;
-      } else if (rnd < 0.16) {
+      } else if (rnd < 0.10) {
         type = BlockType.SHIELD;
-      } else if (rnd < 0.24) {
+      } else if (rnd < 0.15) {
         type = BlockType.CRYSTAL;
       }
 
@@ -1723,7 +1799,7 @@ class Game {
       if (type === BlockType.NORMAL && Math.random() < bal.skipChance) continue;
 
       const blockHp = type === BlockType.BOSS ? hp * 4 : hp;
-      const newBlock = new Block(col, 0, type, blockHp);
+      const newBlock = new Block(col, 1, type, blockHp); // row 1 — row 0 always stays empty
       if (type === BlockType.BOSS) {
         const behaviors = ['shield_core', 'gravity_core', 'summoner_core', 'corrupt_core', 'laser_core'];
         newBlock.bossType = behaviors[(Math.floor(stage / BOSS_INTERVAL) - 1) % behaviors.length];
@@ -1731,11 +1807,11 @@ class Game {
       this.blocks.push(newBlock);
     }
 
-    // Collect columns occupied at row 0
+    // Collect columns occupied at row 1
     const takenCols = () => [
-      ...this.blocks.filter(b => b.row === 0).map(b => b.col),
-      ...this.orbs.filter(o => o.row === 0).map(o => o.col),
-      ...this.markers.filter(m => m.row === 0).map(m => m.col),
+      ...this.blocks.filter(b => b.row === 1).map(b => b.col),
+      ...this.orbs.filter(o => o.row === 1).map(o => o.col),
+      ...this.markers.filter(m => m.row === 1).map(m => m.col),
     ];
 
     // Spawn a ball-orb in a free column if conditions are met
@@ -1744,7 +1820,7 @@ class Game {
     if (activeOrbs < MAX_ORBS && (needOrb || Math.random() < ORB_SPAWN_CHANCE)) {
       const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols().includes(c));
       if (freeCols.length > 0) {
-        this.orbs.push(new BallOrb(randItem(freeCols), 0));
+        this.orbs.push(new BallOrb(randItem(freeCols), 1)); // row 1, not row 0
       }
     }
 
@@ -1753,7 +1829,7 @@ class Game {
     if (markerChance > 0 && Math.random() < markerChance) {
       const freeCols = Array.from({ length: COLS }, (_, i) => i).filter(c => !takenCols().includes(c));
       if (freeCols.length > 0) {
-        this.markers.push(new Marker(randItem(freeCols), 0, this._pickMarkerType(stage)));
+        this.markers.push(new Marker(randItem(freeCols), 1, this._pickMarkerType(stage))); // row 1, not row 0
       }
     }
 
@@ -2146,6 +2222,34 @@ class Game {
       }
     }
     screenShake(3, 2);
+  }
+
+  // Row/col clear: instantly destroys all blocks (triggered by laser explosion blocks on death)
+  // Safe against chain loops: b.alive = false before onDestroy, so re-entrant calls skip dead blocks
+  _clearRow(row) {
+    this.turnLaserUsed = true;
+    const targets = this.blocks.filter(b => b.alive && b.row === row);
+    for (const b of targets) {
+      if (!b.alive) continue; // guard against chain-clear double-processing
+      b.shieldActive = false;  // bypass shield protection
+      b.hp = 0;
+      b.alive = false;
+      b.onDestroy(this);       // handles scoring, special effects, and possible chain clears
+    }
+    screenShake(6, 4);
+  }
+
+  _clearCol(col) {
+    this.turnLaserUsed = true;
+    const targets = this.blocks.filter(b => b.alive && b.col === col);
+    for (const b of targets) {
+      if (!b.alive) continue;
+      b.shieldActive = false;
+      b.hp = 0;
+      b.alive = false;
+      b.onDestroy(this);
+    }
+    screenShake(6, 4);
   }
 
   // ---- Powers ----
@@ -2721,11 +2825,20 @@ class Game {
     if (this.phase !== GamePhase.SHOOTING) return;
 
     for (const ball of this.balls) {
-      const wasActive = ball.active;
+      const wasReturning = ball.returning;
       ball.update(this);
-      // Capture the X of the FIRST ball to exit the bottom for launcher snap
-      if (wasActive && !ball.active && this.firstReturnX === null) {
+      // Capture X of the FIRST ball to hit the bottom — used for launcher snap
+      if (!wasReturning && ball.returning && this.firstReturnX === null) {
         this.firstReturnX = ball.x;
+      }
+    }
+    // Assign collect target to all balls now in returning state
+    if (this.firstReturnX !== null) {
+      const tX = clamp(this.firstReturnX, BALL_RADIUS + 12, W - BALL_RADIUS - 12);
+      for (const ball of this.balls) {
+        if (ball.returning && ball.collectTargetX === null) {
+          ball.collectTargetX = tX;
+        }
       }
     }
 
