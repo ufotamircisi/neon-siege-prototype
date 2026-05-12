@@ -177,12 +177,14 @@ const Save = {
           d.pendingMilestonePowers = 0;
         }
         if (!d.claimedMilestoneRewards) d.claimedMilestoneRewards = [];
+        if (!d.audioPrefs) d.audioPrefs = { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false };
         return d;
       }
     } catch(e) {}
     return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
              highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0,
-             bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [] };
+             bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [],
+             audioPrefs: { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false } };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -267,6 +269,7 @@ const Achievements = {
       Save.save(saveData);
     }
     _achQueue.push(ach);
+    AudioManager.play('achieve');
     _showNextAch();
   },
 
@@ -317,6 +320,178 @@ function hexToRgba(hex, a) {
   const b = parseInt(hex.slice(5,7),16);
   return `rgba(${r},${g},${b},${a})`;
 }
+
+// ============================================================
+// AUDIO MANAGER  (Web Audio API — lazy-init after first gesture)
+// ============================================================
+
+const AudioManager = (() => {
+  let _ctx = null, _masterGain = null, _sfxGain = null, _musicGain = null;
+  let _musicNodes = null, _noiseBuffer = null, _initialized = false;
+  let _lastHitTime = 0, _lastPortalTime = 0;
+  const HIT_THROTTLE_MS = 80, PORTAL_THROTTLE_MS = 200;
+
+  function _prefs() {
+    if (!saveData.audioPrefs)
+      saveData.audioPrefs = { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false };
+    return saveData.audioPrefs;
+  }
+
+  function _osc(freq, type, gainVal, dur, delay) {
+    if (!_ctx) return;
+    const t = _ctx.currentTime + (delay || 0);
+    const o = _ctx.createOscillator(), g = _ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(gainVal, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(_sfxGain);
+    o.start(t); o.stop(t + dur + 0.01);
+  }
+
+  function _sweep(f0, f1, type, gainVal, dur, delay) {
+    if (!_ctx) return;
+    const t = _ctx.currentTime + (delay || 0);
+    const o = _ctx.createOscillator(), g = _ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(gainVal, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(_sfxGain);
+    o.start(t); o.stop(t + dur + 0.01);
+  }
+
+  function _noise(gainVal, dur, cutoff, delay) {
+    if (!_ctx || !_noiseBuffer) return;
+    const t = _ctx.currentTime + (delay || 0);
+    const src = _ctx.createBufferSource();
+    src.buffer = _noiseBuffer;
+    const filt = _ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = cutoff;
+    const g = _ctx.createGain();
+    const d = Math.min(dur, 0.48);
+    g.gain.setValueAtTime(gainVal, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    src.connect(filt); filt.connect(g); g.connect(_sfxGain);
+    src.start(t); src.stop(t + d + 0.01);
+  }
+
+  const am = {
+    init() {
+      if (_initialized) { if (_ctx.state === 'suspended') _ctx.resume(); return; }
+      try {
+        _ctx = new (window.AudioContext || window.webkitAudioContext)();
+        _masterGain = _ctx.createGain();
+        _masterGain.gain.value = _prefs().volume;
+        _masterGain.connect(_ctx.destination);
+
+        _sfxGain = _ctx.createGain();
+        _sfxGain.gain.value = _prefs().sfxEnabled ? 1.0 : 0.0;
+        _sfxGain.connect(_masterGain);
+
+        _musicGain = _ctx.createGain();
+        _musicGain.gain.value = 0;
+        _musicGain.connect(_masterGain);
+
+        // Pre-bake ~0.5 s of white noise — reuse across buffer-source nodes
+        const len = Math.floor(_ctx.sampleRate * 0.5);
+        _noiseBuffer = _ctx.createBuffer(1, len, _ctx.sampleRate);
+        const d = _noiseBuffer.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+
+        _initialized = true;
+        if (_prefs().musicEnabled) this._startMusic();
+      } catch (e) { /* Web Audio unavailable — silent fail */ }
+    },
+
+    _startMusic() {
+      if (!_initialized || _musicNodes) return;
+      _musicNodes = [];
+      // Gentle ambient drone: A1 + E2 + A2 through a 280 Hz low-pass filter
+      [[55, 0], [82.5, 4], [110, -3]].forEach(([freq, detune]) => {
+        const o = _ctx.createOscillator(), f = _ctx.createBiquadFilter(), g = _ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq; o.detune.value = detune;
+        f.type = 'lowpass'; f.frequency.value = 280;
+        g.gain.value = 0.038;
+        o.connect(f); f.connect(g); g.connect(_musicGain);
+        o.start();
+        _musicNodes.push(o);
+      });
+      _musicGain.gain.setValueAtTime(0, _ctx.currentTime);
+      _musicGain.gain.linearRampToValueAtTime(1, _ctx.currentTime + 2.0);
+    },
+
+    _stopMusic() {
+      if (!_musicNodes) return;
+      const now = _ctx.currentTime;
+      _musicGain.gain.setValueAtTime(_musicGain.gain.value, now);
+      _musicGain.gain.linearRampToValueAtTime(0, now + 1.5);
+      const nodes = _musicNodes; _musicNodes = null;
+      setTimeout(() => nodes.forEach(o => { try { o.stop(); } catch(e){} }), 1600);
+    },
+
+    setMusicEnabled(en) {
+      if (!_initialized) return;
+      if (en) { _musicGain.gain.value = 1; this._startMusic(); }
+      else this._stopMusic();
+    },
+
+    setSfxEnabled(en) { if (_initialized) _sfxGain.gain.value = en ? 1.0 : 0.0; },
+
+    setVolume(v) { if (_initialized) _masterGain.gain.value = v; },
+
+    play(type) {
+      if (!_initialized || !_prefs().sfxEnabled) return;
+      if (_ctx.state === 'suspended') _ctx.resume();
+      const now = Date.now();
+      switch (type) {
+        case 'click':    _osc(880, 'sine', 0.16, 0.07); break;
+        case 'shoot':    _sweep(280, 1100, 'sine', 0.20, 0.13); break;
+        case 'hit':
+          if (now - _lastHitTime < HIT_THROTTLE_MS) return;
+          _lastHitTime = now;
+          _osc(90, 'sawtooth', 0.15, 0.055); _noise(0.08, 0.055, 700);
+          break;
+        case 'destroy':
+          _noise(0.32, 0.20, 2200); _osc(55, 'sawtooth', 0.22, 0.16);
+          break;
+        case 'crystal':
+          _osc(1320, 'sine', 0.18, 0.20); _osc(1980, 'sine', 0.10, 0.18, 0.05);
+          break;
+        case 'bomb':
+          _noise(0.48, 0.32, 350); _osc(38, 'sawtooth', 0.32, 0.28);
+          break;
+        case 'mult10':
+          [880, 1100, 1320].forEach((f, i) => _osc(f, 'square', 0.13, 0.14, i * 0.065));
+          break;
+        case 'recall':   _sweep(900, 180, 'sine', 0.20, 0.20); break;
+        case 'laser':    _sweep(2200, 350, 'sawtooth', 0.18, 0.14); break;
+        case 'portal':
+          if (now - _lastPortalTime < PORTAL_THROTTLE_MS) return;
+          _lastPortalTime = now;
+          [440, 660, 880, 1100].forEach((f, i) => _osc(f, 'sine', 0.11, 0.10, i * 0.04));
+          break;
+        case 'mystery':
+          for (let i = 0; i < 4; i++)
+            _osc(200 + Math.random() * 700, i % 2 ? 'sine' : 'triangle', 0.10, 0.14, i * 0.07);
+          break;
+        case 'achieve':
+          [523, 659, 784, 1047].forEach((f, i) => _osc(f, 'triangle', 0.18, 0.28, i * 0.10));
+          break;
+        case 'levelComplete':
+          [523, 659, 784, 1047, 1319].forEach((f, i) => _osc(f, 'sine', 0.20, 0.30, i * 0.09));
+          break;
+        case 'gameOver':
+          [440, 370, 330, 220].forEach((f, i) => _osc(f, 'sawtooth', 0.18, 0.35, i * 0.18));
+          break;
+        case 'milestone':
+          [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => _osc(f, 'triangle', 0.20, 0.22, i * 0.07));
+          break;
+      }
+    },
+  };
+  return am;
+})();
 
 // ============================================================
 // CANVAS / RESIZE
@@ -501,6 +676,7 @@ class Block {
       this.shieldActive = false;
       this.hitFlash = 4;
       spawnParticles(this.cx, this.cy, '#00ccff', 5, { speed: 2, decay: 0.07 });
+      AudioManager.play('hit');
       return false; // block not destroyed
     }
     this.hp -= dmg;
@@ -511,11 +687,14 @@ class Block {
       this.onDestroy(game);
       return true; // destroyed
     }
+    AudioManager.play('hit');
     return false;
   }
 
   onDestroy(game) {
     game.onBlockDestroyed(this);
+    if (this.type === BlockType.CRYSTAL) AudioManager.play('crystal');
+    else AudioManager.play('destroy');
     const colors = BLOCK_COLORS[this.type];
     spawnExplosionParticles(this.cx, this.cy, colors.glow);
 
@@ -1100,6 +1279,7 @@ class Ball {
             pp.usedThisShot = true; // mark for removal at turn end
             spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
             spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
+            AudioManager.play('portal');
             if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
             break;
           }
@@ -1111,6 +1291,7 @@ class Ball {
             pp.usedThisShot = true; // mark for removal at turn end
             spawnParticles(pp.bx, pp.by, '#ff44cc', 7, { speed: 3, decay: 0.06, size: 2 });
             spawnParticles(pp.ax, pp.ay, '#00f5ff', 7, { speed: 3, decay: 0.06, size: 2 });
+            AudioManager.play('portal');
             if (game.hasRelic && game.hasRelic('void_compass')) game.voidCompassReady = true;
             break;
           }
@@ -1666,6 +1847,7 @@ class Game {
   shoot() {
     if (this.phase !== GamePhase.IDLE) return;
     this.launcher.snapToTarget(); // V7B: commit exact aim before balls fly
+    AudioManager.play('shoot');
     this.phase = GamePhase.SHOOTING;
     this.firstHitThisTurn = true;
     this.iceEchoUsed = false;
@@ -1860,6 +2042,7 @@ class Game {
     }
 
     floatingTexts.push(new FloatingText(cx, cy - 28, label, color));
+    AudioManager.play('mystery');
     this.mysteryProcessing = false;
   }
 
@@ -1910,6 +2093,7 @@ class Game {
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
           floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+          AudioManager.play('laser');
         }
         break;
       case 'laser_v':
@@ -1920,6 +2104,7 @@ class Game {
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
           floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+          AudioManager.play('laser');
         }
         break;
       case 'laser_cross':
@@ -1932,6 +2117,7 @@ class Game {
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
           floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+          AudioManager.play('laser');
         }
         break;
     }
@@ -1986,6 +2172,7 @@ class Game {
     if (hit > 0) {
       floatingTexts.push(new FloatingText(W / 2, H * 0.43, '💣 BOMB!', '#ff6600'));
       screenShake(12, 7);
+      AudioManager.play('bomb');
     }
   }
 
@@ -2000,6 +2187,7 @@ class Game {
       this.ballMultActive = true;
       this.updatePowerBar();
       floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
+      AudioManager.play('mult10');
     } else if (this.phase === GamePhase.SHOOTING && this.lastShotAngle !== null) {
       this.powMult--;
       saveData.multiplier10xCount = this.powMult; // V8C: persist spend immediately
@@ -2039,6 +2227,7 @@ class Game {
       }
     }
     floatingTexts.push(new FloatingText(W / 2, H * 0.5, '↓ RECALLED', '#00ccff'));
+    AudioManager.play('recall');
     this.updatePowerBar();
   }
 
@@ -2371,6 +2560,7 @@ class Game {
       floatingTexts.push(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
       floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+1 BOMB  +1 ×10  +SHARDS', '#00ff88'));
       screenShake(10, 6);
+      AudioManager.play('milestone');
       setTimeout(() => this.showRelicChoice(), 700);
       return;
     }
@@ -2445,6 +2635,7 @@ class Game {
     document.getElementById('go-shards').textContent = this.shards;
     document.getElementById('go-best').textContent = saveData.bestStage;
 
+    AudioManager.play('gameOver');
     setTimeout(() => Screens.show('gameover'), 700);
   }
 
@@ -2486,6 +2677,7 @@ class Game {
       document.getElementById('lc-bonus').textContent =
         (isMilestone && saveData.claimedMilestoneRewards.includes(lv)) ? '(Milestone already claimed)' : '';
     }
+    AudioManager.play('levelComplete');
     Screens.show('levelcomplete');
   }
 
@@ -2957,6 +3149,7 @@ function getCanvasPos(e) {
 }
 
 function onPointerDown(e) {
+  AudioManager.init();
   if (!game || game.phase !== GamePhase.IDLE) return;
   e.preventDefault();
   const pos = getCanvasPos(e);
@@ -3076,6 +3269,136 @@ document.getElementById('btn-next-level').addEventListener('click', () => {
 document.getElementById('btn-goto-levelselect').addEventListener('click', () => {
   buildLevelSelectGrid();
   Screens.show('levelselect');
+});
+
+// ============================================================
+// SETTINGS SCREEN
+// ============================================================
+
+let _settingsBack = 'menu'; // 'menu' | 'pause'
+
+function openSettings(backTarget) {
+  _settingsBack = backTarget;
+  _buildSettingsUI();
+  Screens.show('settings');
+}
+
+function _buildSettingsUI() {
+  const p = saveData.audioPrefs;
+  const sfxBtn   = document.getElementById('toggle-sfx');
+  const musicBtn = document.getElementById('toggle-music');
+  const hapBtn   = document.getElementById('toggle-haptics');
+  const vol      = document.getElementById('settings-volume');
+
+  sfxBtn.textContent   = p.sfxEnabled   ? 'ON' : 'OFF';
+  sfxBtn.classList.toggle('active', p.sfxEnabled);
+
+  musicBtn.textContent = p.musicEnabled ? 'ON' : 'OFF';
+  musicBtn.classList.toggle('active', p.musicEnabled);
+
+  hapBtn.textContent   = p.hapticsEnabled ? 'ON' : 'OFF';
+  hapBtn.classList.toggle('active', p.hapticsEnabled);
+
+  vol.value = Math.round(p.volume * 100);
+}
+
+function showInfoModal(title, body) {
+  document.getElementById('info-modal-title').textContent = title;
+  document.getElementById('info-modal-body').textContent  = body;
+  document.getElementById('info-modal').style.display    = 'flex';
+}
+
+// Settings navigation
+document.getElementById('btn-settings').addEventListener('click', () => openSettings('menu'));
+
+document.getElementById('btn-settings-hud').addEventListener('click', () => {
+  if (game && game.phase !== GamePhase.GAMEOVER) Screens.show('pause');
+  openSettings('pause');
+});
+
+document.getElementById('btn-settings-pause').addEventListener('click', () => openSettings('pause'));
+
+document.getElementById('btn-back-settings').addEventListener('click', () => {
+  if (_settingsBack === 'menu') updateMenuDisplay();
+  Screens.show(_settingsBack);
+});
+
+// Audio toggles
+document.getElementById('toggle-sfx').addEventListener('click', () => {
+  const p = saveData.audioPrefs;
+  p.sfxEnabled = !p.sfxEnabled;
+  AudioManager.setSfxEnabled(p.sfxEnabled);
+  Save.save(saveData);
+  _buildSettingsUI();
+});
+
+document.getElementById('toggle-music').addEventListener('click', () => {
+  const p = saveData.audioPrefs;
+  p.musicEnabled = !p.musicEnabled;
+  AudioManager.setMusicEnabled(p.musicEnabled);
+  Save.save(saveData);
+  _buildSettingsUI();
+});
+
+document.getElementById('settings-volume').addEventListener('input', () => {
+  const v = parseInt(document.getElementById('settings-volume').value, 10) / 100;
+  saveData.audioPrefs.volume = v;
+  AudioManager.setVolume(v);
+  Save.save(saveData);
+});
+
+document.getElementById('toggle-haptics').addEventListener('click', () => {
+  const p = saveData.audioPrefs;
+  p.hapticsEnabled = !p.hapticsEnabled;
+  Save.save(saveData);
+  _buildSettingsUI();
+});
+
+// Info placeholders
+document.getElementById('btn-privacy').addEventListener('click', () =>
+  showInfoModal('PRIVACY POLICY',
+    'Privacy Policy will be available in the mobile version of Neon Siege.'));
+
+document.getElementById('btn-terms').addEventListener('click', () =>
+  showInfoModal('TERMS OF USE',
+    'Terms of Use will be available in the mobile version of Neon Siege.'));
+
+document.getElementById('btn-contact').addEventListener('click', () =>
+  showInfoModal('CONTACT / SUPPORT',
+    'Support contact will be added before release.\nThank you for playing Neon Siege!'));
+
+document.getElementById('btn-restore').addEventListener('click', () =>
+  showInfoModal('RESTORE PURCHASES',
+    'Restore Purchases is available in the mobile version of Neon Siege.'));
+
+document.getElementById('btn-about').addEventListener('click', () =>
+  showInfoModal('ABOUT / CREDITS',
+    'NEON SIEGE\nArcade Roguelike Prototype\n\nBuilt with HTML5 Canvas.\nNo external libraries.\n\nThank you for playing!'));
+
+document.getElementById('btn-info-close').addEventListener('click', () => {
+  document.getElementById('info-modal').style.display = 'none';
+});
+
+// Reset Progress
+document.getElementById('btn-reset-progress').addEventListener('click', () => {
+  document.getElementById('reset-modal').style.display = 'flex';
+});
+
+document.getElementById('btn-reset-cancel').addEventListener('click', () => {
+  document.getElementById('reset-modal').style.display = 'none';
+});
+
+document.getElementById('btn-reset-confirm').addEventListener('click', () => {
+  localStorage.removeItem('neonSiegeSave');
+  location.reload();
+});
+
+// Document-level: init audio + play click on any button press
+document.addEventListener('click', (e) => {
+  if (e.target.closest('button')) {
+    AudioManager.init();
+    AudioManager.play('click');
+  }
 });
 
 // ============================================================

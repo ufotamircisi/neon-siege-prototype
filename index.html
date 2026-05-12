@@ -33,6 +33,7 @@
           ACHIEVEMENTS
           <span class="btn-badge" id="menu-ach-count">0 / 25</span>
         </button>
+        <button class="btn btn-secondary" id="btn-settings">⚙ SETTINGS</button>
       </div>
     </div>
 
@@ -87,6 +88,7 @@
           <div class="hud-item shard-hud">◈ <span id="hud-shards">0</span></div>
         </div>
         <div class="hud-right">
+          <button class="icon-btn" id="btn-settings-hud" title="Settings">⚙</button>
           <button class="icon-btn" id="btn-pause">⏸</button>
         </div>
       </div>
@@ -125,6 +127,7 @@
         <h2 class="screen-title">PAUSED</h2>
         <button class="btn btn-primary" id="btn-resume">RESUME</button>
         <button class="btn btn-secondary" id="btn-restart-pause">RESTART LEVEL</button>
+        <button class="btn btn-secondary" id="btn-settings-pause">⚙ SETTINGS</button>
         <button class="btn btn-secondary" id="btn-menu-pause">MAIN MENU</button>
       </div>
     </div>
@@ -187,6 +190,70 @@
         </div>
         <button class="btn btn-primary" id="btn-restart-go">RETRY LEVEL</button>
         <button class="btn btn-secondary" id="btn-menu-go">MAIN MENU</button>
+      </div>
+    </div>
+    <!-- Settings Screen -->
+    <div id="screen-settings" class="screen">
+      <div class="menu-bg"></div>
+      <div class="settings-wrap">
+        <h2 class="screen-title">SETTINGS</h2>
+
+        <div class="settings-section">
+          <div class="settings-row">
+            <span class="settings-label">SOUND FX</span>
+            <button class="settings-toggle" id="toggle-sfx">ON</button>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">MUSIC</span>
+            <button class="settings-toggle" id="toggle-music">OFF</button>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">VOLUME</span>
+            <div class="settings-slider-wrap">
+              <input type="range" id="settings-volume" min="0" max="100" value="70">
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">VIBRATION</span>
+            <button class="settings-toggle" id="toggle-haptics">OFF</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <button class="settings-link-btn" id="btn-privacy">PRIVACY POLICY</button>
+          <button class="settings-link-btn" id="btn-terms">TERMS OF USE</button>
+          <button class="settings-link-btn" id="btn-contact">CONTACT / SUPPORT</button>
+          <button class="settings-link-btn" id="btn-restore">RESTORE PURCHASES</button>
+          <button class="settings-link-btn" id="btn-about">ABOUT / CREDITS</button>
+        </div>
+
+        <div class="settings-section">
+          <button class="settings-reset-btn" id="btn-reset-progress">RESET PROGRESS</button>
+        </div>
+
+        <button class="btn btn-secondary settings-back-btn" id="btn-back-settings">← BACK</button>
+      </div>
+    </div>
+
+  </div><!-- #app -->
+
+  <!-- Info Modal (above everything) -->
+  <div id="info-modal" class="info-modal-overlay">
+    <div class="info-modal-panel">
+      <div class="info-modal-title" id="info-modal-title"></div>
+      <div class="info-modal-body" id="info-modal-body"></div>
+      <button class="btn btn-secondary" id="btn-info-close">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Reset Confirm Modal -->
+  <div id="reset-modal" class="info-modal-overlay">
+    <div class="info-modal-panel">
+      <div class="info-modal-title" style="color:#ff0044;text-shadow:0 0 12px #ff0044">RESET PROGRESS?</div>
+      <div class="info-modal-body">This will erase all level progress, inventory, achievements, shards, and settings. This cannot be undone.</div>
+      <div style="display:flex;gap:10px;width:100%;margin-top:4px">
+        <button class="btn btn-secondary" id="btn-reset-cancel" style="flex:1">CANCEL</button>
+        <button class="btn" id="btn-reset-confirm" style="flex:1;background:linear-gradient(135deg,#660000,#cc0022);color:#fff;box-shadow:0 0 16px rgba(255,0,68,0.4)">CONFIRM</button>
       </div>
     </div>
   </div>

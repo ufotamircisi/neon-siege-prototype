@@ -1031,6 +1031,227 @@ html, body {
   flex-shrink: 0;
 }
 
+/* ============================
+   SETTINGS SCREEN
+   ============================ */
+
+#screen-settings {
+  justify-content: flex-start;
+  align-items: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-wrap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 430px;
+  padding: 20px 18px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.settings-wrap .screen-title {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.settings-section {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(0,245,255,0.09);
+  border-radius: 14px;
+  padding: 6px 0;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  min-height: 52px;
+}
+
+.settings-row:last-child { border-bottom: none; }
+
+.settings-label {
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+/* Toggle button */
+.settings-toggle {
+  min-width: 56px;
+  height: 32px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0 10px;
+}
+
+.settings-toggle.active {
+  background: rgba(0,245,255,0.18);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0,245,255,0.30);
+}
+
+/* Volume slider */
+.settings-slider-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-left: 16px;
+}
+
+input[type='range']#settings-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0,245,255,0.20);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type='range']#settings-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0,245,255,0.6);
+  cursor: pointer;
+}
+
+input[type='range']#settings-volume::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0,245,255,0.6);
+  cursor: pointer;
+  border: none;
+}
+
+/* Info link buttons */
+.settings-link-btn {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-link-btn:last-child { border-bottom: none; }
+
+.settings-link-btn:hover,
+.settings-link-btn:active { background: rgba(255,255,255,0.06); color: var(--text); }
+
+/* Reset progress — danger red button */
+.settings-reset-btn {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(255,0,68,0.07);
+  border: 1px solid rgba(255,0,68,0.30);
+  border-radius: 10px;
+  color: var(--neon-red);
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: background 0.12s, box-shadow 0.12s;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-reset-btn:hover,
+.settings-reset-btn:active {
+  background: rgba(255,0,68,0.15);
+  box-shadow: 0 0 18px rgba(255,0,68,0.25);
+}
+
+.settings-back-btn {
+  margin-top: 4px;
+}
+
+/* ============================
+   INFO / CONFIRM MODAL
+   ============================ */
+
+.info-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.82);
+  z-index: 300;
+  backdrop-filter: blur(6px);
+  padding: 20px;
+}
+
+.info-modal-panel {
+  background: rgba(6,8,24,0.98);
+  border: 1px solid rgba(0,245,255,0.22);
+  border-radius: 18px;
+  padding: 28px 22px;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 0 50px rgba(0,0,0,0.9), 0 0 40px rgba(0,100,255,0.12);
+}
+
+.info-modal-title {
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  color: #fff;
+  text-shadow: 0 0 12px var(--neon-cyan);
+  text-align: center;
+}
+
+.info-modal-body {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.7;
+  text-align: center;
+  white-space: pre-line;
+}
+
 /* Level Complete overlay */
 .levelcomplete-title {
   color: var(--neon-green);
