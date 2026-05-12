@@ -25,10 +25,15 @@
             <div class="stat-label">SHARDS</div>
             <div class="stat-value" id="menu-shards">0</div>
           </div>
+          <div class="stat-box stat-box-diamond">
+            <div class="stat-label">DIAMONDS</div>
+            <div class="stat-value" id="menu-diamonds">0</div>
+          </div>
         </div>
         <button class="btn btn-primary" id="btn-continue">CONTINUE</button>
         <button class="btn btn-secondary" id="btn-start">LEVELS</button>
         <button class="btn btn-secondary" id="btn-upgrades">UPGRADES</button>
+        <button class="btn btn-secondary" id="btn-store">💎 DIAMOND MARKET</button>
         <button class="btn btn-secondary" id="btn-achievements">
           ACHIEVEMENTS
           <span class="btn-badge" id="menu-ach-count">0 / 25</span>
@@ -81,10 +86,11 @@
     <div id="screen-game" class="screen">
       <div id="hud">
         <div class="hud-left">
-          <div class="hud-item">LEVEL <span id="hud-stage">1</span></div>
-          <div class="hud-item">SCORE <span id="hud-score">0</span></div>
+          <div class="hud-item">LV <span id="hud-stage">1</span></div>
+          <div class="hud-item hud-score-item">SCORE <span id="hud-score">0</span></div>
         </div>
         <div class="hud-center">
+          <div class="hud-item diamond-hud">💎 <span id="hud-diamonds">0</span></div>
           <div class="hud-item shard-hud">◈ <span id="hud-shards">0</span></div>
         </div>
         <div class="hud-right">
@@ -192,6 +198,135 @@
         <button class="btn btn-secondary" id="btn-menu-go">MAIN MENU</button>
       </div>
     </div>
+    <!-- Store Screen -->
+    <div id="screen-store" class="screen">
+      <div class="menu-bg"></div>
+      <div class="store-wrap">
+
+        <!-- Top bar: back + title (balanced with spacer) -->
+        <div class="store-top-bar">
+          <button class="btn btn-secondary store-back-inline-btn" id="btn-back-store">← BACK</button>
+          <h2 class="screen-title store-screen-title">STORE</h2>
+          <div class="store-top-spacer"></div>
+        </div>
+
+        <!-- Balance row: Diamonds / Bombs / 10x -->
+        <div class="store-balance-row">
+          <div class="store-bal-chip store-bal-diamond">
+            <span class="sbal-icon">💎</span>
+            <span class="sbal-val" id="store-diamonds">0</span>
+            <span class="sbal-label">DIAMONDS</span>
+          </div>
+          <div class="store-bal-chip store-bal-bomb">
+            <span class="sbal-icon">💣</span>
+            <span class="sbal-val" id="store-bombs">0</span>
+            <span class="sbal-label">BOMBS</span>
+          </div>
+          <div class="store-bal-chip store-bal-mult">
+            <span class="sbal-icon">✕10</span>
+            <span class="sbal-val" id="store-mults">0</span>
+            <span class="sbal-label">MULTS</span>
+          </div>
+        </div>
+
+        <!-- Diamond Packs -->
+        <div class="store-section">
+          <div class="store-section-title">DIAMOND PACKS</div>
+          <div class="store-packs-grid">
+            <div class="store-pack-card">
+              <div class="pack-gem">💎</div>
+              <div class="pack-amount">100</div>
+              <div class="pack-price">$1.99</div>
+              <button class="store-pack-btn" onclick="Store.buyPack(0)">BUY</button>
+            </div>
+            <div class="store-pack-card pack-popular">
+              <div class="pack-badge">POPULAR</div>
+              <div class="pack-gem">💎💎</div>
+              <div class="pack-amount">600</div>
+              <div class="pack-price">$4.99</div>
+              <button class="store-pack-btn" onclick="Store.buyPack(1)">BUY</button>
+            </div>
+            <div class="store-pack-card">
+              <div class="pack-gem">💎💎💎</div>
+              <div class="pack-amount">1400</div>
+              <div class="pack-price">$9.99</div>
+              <button class="store-pack-btn" onclick="Store.buyPack(2)">BUY</button>
+            </div>
+            <div class="store-pack-card pack-best">
+              <div class="pack-badge">BEST VALUE</div>
+              <div class="pack-gem">💎💎💎💎</div>
+              <div class="pack-amount">3500</div>
+              <div class="pack-price">$19.99</div>
+              <button class="store-pack-btn" onclick="Store.buyPack(3)">BUY</button>
+            </div>
+            <div class="store-pack-card">
+              <div class="pack-gem">💎💎💎💎💎</div>
+              <div class="pack-amount">10000</div>
+              <div class="pack-price">$49.99</div>
+              <button class="store-pack-btn" onclick="Store.buyPack(4)">BUY</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- In-game Market -->
+        <div class="store-section">
+          <div class="store-section-title">IN-GAME MARKET</div>
+          <div class="store-items-list">
+            <button class="store-item-btn" id="btn-buy-bombs">
+              <span class="item-icon">💣</span>
+              <span class="item-info">
+                <span class="item-name">3 BOMBS</span>
+                <span class="item-desc">Clear 3 bottom rows instantly</span>
+              </span>
+              <span class="item-cost">100 💎</span>
+            </button>
+            <button class="store-item-btn" id="btn-buy-mults">
+              <span class="item-icon">✕10</span>
+              <span class="item-info">
+                <span class="item-name">3 MULTIPLIERS</span>
+                <span class="item-desc">Next shot deals ×10 damage</span>
+              </span>
+              <span class="item-cost">100 💎</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Special Offers / Remove Ads -->
+        <div class="store-section">
+          <div class="store-section-title">SPECIAL OFFERS</div>
+          <div class="store-items-list">
+            <button class="store-item-btn store-no-ads-btn" onclick="Store.buyNoAds(false)">
+              <span class="item-icon">🚫</span>
+              <span class="item-info">
+                <span class="item-name">REMOVE FORCED ADS</span>
+                <span class="item-desc">Skip forced ads — rewarded ads remain</span>
+              </span>
+              <span class="item-cost">$1.99</span>
+            </button>
+            <button class="store-item-btn store-no-ads-btn" onclick="Store.buyNoAds(true)">
+              <span class="item-icon">⭐</span>
+              <span class="item-info">
+                <span class="item-name">REMOVE ALL ADS</span>
+                <span class="item-desc">Remove every ad including rewarded</span>
+              </span>
+              <span class="item-cost">$2.99</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Cosmetics Coming Soon -->
+        <div class="store-section">
+          <div class="store-section-title">COSMETICS</div>
+          <div class="store-coming-soon">
+            <div class="coming-soon-icon">🎨</div>
+            <div class="coming-soon-text">Cannon Skins · Ball Trails · Arena Themes</div>
+            <div class="coming-soon-label">COMING SOON</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- Settings Screen -->
     <div id="screen-settings" class="screen">
       <div class="menu-bg"></div>

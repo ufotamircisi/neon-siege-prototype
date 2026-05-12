@@ -178,12 +178,13 @@ const Save = {
         }
         if (!d.claimedMilestoneRewards) d.claimedMilestoneRewards = [];
         if (!d.audioPrefs) d.audioPrefs = { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false };
+        if (!('diamonds' in d)) d.diamonds = 0;
         return d;
       }
     } catch(e) {}
     return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
              highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0,
-             bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [],
+             bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [], diamonds: 0,
              audioPrefs: { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false } };
   },
   save(data) {
@@ -2667,12 +2668,13 @@ class Game {
       saveData.claimedMilestoneRewards.push(lv);
       saveData.bombCount++;
       saveData.multiplier10xCount++;
+      saveData.diamonds = (saveData.diamonds || 0) + 10;
       Save.save(saveData);
       // Sync in-memory counts for correct button display if player stays in session
       this.powBomb = saveData.bombCount;
       this.powMult = saveData.multiplier10xCount;
       this.updatePowerBar();
-      document.getElementById('lc-bonus').textContent = '★ MILESTONE REWARD: +1 BOMB  +1 ×10 MULT!';
+      document.getElementById('lc-bonus').textContent = '★ MILESTONE REWARD: +1 BOMB  +1 ×10  +10 💎';
     } else {
       document.getElementById('lc-bonus').textContent =
         (isMilestone && saveData.claimedMilestoneRewards.includes(lv)) ? '(Milestone already claimed)' : '';
@@ -2687,6 +2689,7 @@ class Game {
     document.getElementById('hud-stage').textContent = this.level;
     document.getElementById('hud-score').textContent = this.score;
     document.getElementById('hud-shards').textContent = this.shards;
+    document.getElementById('hud-diamonds').textContent = saveData.diamonds;
     document.getElementById('balls-count').textContent = this.ballCount;
     // V5A: Track highest ball count across all time
     if (this.ballCount > saveData.stats.highestBallCount) {
@@ -2994,6 +2997,7 @@ function buildLevelSelectGrid() {
 function updateMenuDisplay() {
   document.getElementById('menu-best-stage').textContent = Math.max(0, saveData.highestUnlockedLevel - 1);
   document.getElementById('menu-shards').textContent = saveData.totalShards;
+  document.getElementById('menu-diamonds').textContent = saveData.diamonds;
   // V5B: Achievement count badge
   const unlockedN = ACHIEVEMENTS.filter(a => Achievements.isUnlocked(a.id)).length;
   const badge = document.getElementById('menu-ach-count');
@@ -3270,6 +3274,73 @@ document.getElementById('btn-goto-levelselect').addEventListener('click', () => 
   buildLevelSelectGrid();
   Screens.show('levelselect');
 });
+
+// ============================================================
+// STORE / DIAMOND MARKET
+// ============================================================
+
+const DIAMOND_PACKS = [
+  { gems: 100,   price: '$1.99'  },
+  { gems: 600,   price: '$4.99'  },
+  { gems: 1400,  price: '$9.99'  },
+  { gems: 3500,  price: '$19.99' },
+  { gems: 10000, price: '$49.99' },
+];
+
+const Store = {
+  open() {
+    document.getElementById('store-diamonds').textContent = saveData.diamonds || 0;
+    document.getElementById('store-bombs').textContent    = saveData.bombCount || 0;
+    document.getElementById('store-mults').textContent    = saveData.multiplier10xCount || 0;
+    Screens.show('store');
+  },
+
+  buyPack(index) {
+    const pack = DIAMOND_PACKS[index];
+    if (!pack) return;
+    showInfoModal('DIAMOND PACKS',
+      `Diamond packs will be available in the mobile release of Neon Siege.\n\n` +
+      `Pack: ${pack.gems} 💎 for ${pack.price}`);
+  },
+
+  buyItem(type) {
+    const COST = 100;
+    if ((saveData.diamonds || 0) < COST) {
+      showInfoModal('NOT ENOUGH DIAMONDS',
+        `You need 100 💎 to buy this item.\n\nEarn diamonds by reaching milestone levels (every 10 levels) or buy a Diamond Pack!`);
+      return;
+    }
+    saveData.diamonds -= COST;
+    if (type === 'bomb') {
+      addPowerInventory('bomb', 3);
+      showInfoModal('PURCHASE COMPLETE', '💣 +3 BOMBS added to your inventory!');
+    } else if (type === 'mult') {
+      addPowerInventory('mult', 3);
+      showInfoModal('PURCHASE COMPLETE', '✕10 +3 MULTIPLIERS added to your inventory!');
+    }
+    Save.save(saveData);
+    document.getElementById('store-diamonds').textContent = saveData.diamonds || 0;
+    document.getElementById('store-bombs').textContent    = saveData.bombCount || 0;
+    document.getElementById('store-mults').textContent    = saveData.multiplier10xCount || 0;
+  },
+
+  buyNoAds(all) {
+    showInfoModal('REMOVE ADS',
+      all
+        ? 'Remove All Ads ($2.99) will be available in the mobile release of Neon Siege.'
+        : 'Remove Forced Ads ($1.99) will be available in the mobile release of Neon Siege.');
+  },
+};
+
+document.getElementById('btn-store').addEventListener('click', () => Store.open());
+
+document.getElementById('btn-back-store').addEventListener('click', () => {
+  updateMenuDisplay();
+  Screens.show('menu');
+});
+
+document.getElementById('btn-buy-bombs').addEventListener('click', () => Store.buyItem('bomb'));
+document.getElementById('btn-buy-mults').addEventListener('click', () => Store.buyItem('mult'));
 
 // ============================================================
 // SETTINGS SCREEN
