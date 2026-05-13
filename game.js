@@ -407,33 +407,52 @@ const AudioManager = (() => {
 
     _startMusic() {
       if (!_initialized || _musicNodes) return;
-      _musicNodes = [];
-      // Gentle ambient drone: A1 + E2 + A2 through a 280 Hz low-pass filter
-      [[55, 0], [82.5, 4], [110, -3]].forEach(([freq, detune]) => {
-        const o = _ctx.createOscillator(), f = _ctx.createBiquadFilter(), g = _ctx.createGain();
-        o.type = 'sine'; o.frequency.value = freq; o.detune.value = detune;
-        f.type = 'lowpass'; f.frequency.value = 280;
-        g.gain.value = 0.038;
-        o.connect(f); f.connect(g); g.connect(_musicGain);
-        o.start();
-        _musicNodes.push(o);
-      });
+
+      const BPM = 126;
+      const STEP_MS = Math.round(60000 / BPM / 2); // 8th note ≈ 238 ms
+
+      // A-minor pentatonic (two octaves): A3 C4 D4 E4 G4 A4 C5 D5
+      const NOTES = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33];
+      const PATTERN = [4, 6, 5, 7, 4, 5, 3, 6, 4, 7, 5, 6, 3, 4, 5, 3];
+
+      let step = 0, alive = true, timerId = null;
+
+      const playNote = (freq, wave, peak, dur) => {
+        const t = _ctx.currentTime;
+        const o = _ctx.createOscillator(), g = _ctx.createGain();
+        o.type = wave; o.frequency.value = freq;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(peak, t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(_musicGain);
+        o.start(t); o.stop(t + dur + 0.02);
+      };
+
+      const tick = () => {
+        if (!alive) return;
+        playNote(NOTES[PATTERN[step % PATTERN.length]], 'triangle', 0.07, 0.20);
+        if (step % 4 === 0) playNote(110, 'sine', 0.05, 0.28);
+        step++;
+        timerId = setTimeout(tick, STEP_MS);
+      };
+
+      _musicNodes = { stop() { alive = false; clearTimeout(timerId); } };
       _musicGain.gain.setValueAtTime(0, _ctx.currentTime);
-      _musicGain.gain.linearRampToValueAtTime(1, _ctx.currentTime + 2.0);
+      _musicGain.gain.linearRampToValueAtTime(0.7, _ctx.currentTime + 2.0);
+      timerId = setTimeout(tick, 80);
     },
 
     _stopMusic() {
       if (!_musicNodes) return;
+      _musicNodes.stop(); _musicNodes = null;
       const now = _ctx.currentTime;
       _musicGain.gain.setValueAtTime(_musicGain.gain.value, now);
       _musicGain.gain.linearRampToValueAtTime(0, now + 1.5);
-      const nodes = _musicNodes; _musicNodes = null;
-      setTimeout(() => nodes.forEach(o => { try { o.stop(); } catch(e){} }), 1600);
     },
 
     setMusicEnabled(en) {
       if (!_initialized) return;
-      if (en) { _musicGain.gain.value = 1; this._startMusic(); }
+      if (en) this._startMusic();
       else this._stopMusic();
     },
 
