@@ -1,0 +1,22 @@
+{
+  "appId": "com.erolozcitak.neonsiege",
+  "appName": "Neon Siege",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#000000"
+  },
+  "ios": {
+    "backgroundColor": "#000000"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "backgroundColor": "#000000",
+      "launchAutoHide": true
+    }
+  }
+}
