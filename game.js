@@ -223,7 +223,7 @@ function _getAchEl() {
   if (!_achEl) {
     _achEl = document.createElement('div');
     _achEl.style.cssText = [
-      'position:fixed', 'top:68px', 'right:-320px', 'z-index:200',
+      'position:fixed', 'top:calc(68px + env(safe-area-inset-top, 0px))', 'right:-320px', 'z-index:200',
       'background:rgba(6,2,20,0.96)', 'border:1px solid #ffcc44',
       'border-radius:12px', 'padding:10px 14px', 'min-width:200px', 'max-width:270px',
       'box-shadow:0 0 28px rgba(255,200,0,0.25)', 'transition:right 0.38s ease',
@@ -556,17 +556,22 @@ let W = 0, H = 0, blockW = 0, blockH = 0, blockPad = 0;
 let launcherY = 0;
 
 function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
   const parent = canvas.parentElement;
+  const hud = document.getElementById('hud');
+  const powerBar = document.getElementById('power-bar');
   const availW = Math.min(parent.clientWidth, 480);
-  // V6E: subtract HUD (~48px) + redesigned power bar (~80px) so canvas never overflows
-  const availH = parent.clientHeight - 128;
+  // Measure actual HUD + power-bar heights so safe-area padding is included
+  const hudH = hud ? hud.offsetHeight : 52;
+  const barH = powerBar ? powerBar.offsetHeight : 80;
+  const availH = Math.max(parent.clientHeight - hudH - barH, 200);
 
-  // Force portrait
   W = availW;
   H = availH;
-  canvas.width = W;
-  canvas.height = H;
-  canvas.style.width = W + 'px';
+  // Scale canvas backing store by DPR for crisp rendering on retina / high-DPI screens
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.width  = W + 'px';
   canvas.style.height = H + 'px';
 
   blockPad = 7;
@@ -2919,6 +2924,10 @@ class Game {
   // ---- Draw ----
 
   draw() {
+    // Pin the base transform to DPR scale every frame so retina backing store is used correctly
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     // Screen shake offset
     let sx = 0, sy = 0;
     if (shakeFrames > 0) {
@@ -3319,15 +3328,15 @@ let game = null;
 
 function getCanvasPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
+  // Return CSS-pixel coords — these match W/H used throughout game logic.
+  // DPR scaling is handled by ctx.setTransform in draw(), not here.
   let cx, cy;
   if (e.touches) {
-    cx = (e.touches[0].clientX - rect.left) * scaleX;
-    cy = (e.touches[0].clientY - rect.top) * scaleY;
+    cx = e.touches[0].clientX - rect.left;
+    cy = e.touches[0].clientY - rect.top;
   } else {
-    cx = (e.clientX - rect.left) * scaleX;
-    cy = (e.clientY - rect.top) * scaleY;
+    cx = e.clientX - rect.left;
+    cy = e.clientY - rect.top;
   }
   return { x: cx, y: cy };
 }
