@@ -1592,6 +1592,27 @@ input[type='range']#settings-volume::-moz-range-thumb {
   white-space: pre-line;
 }
 
+/* Watch Ad to Continue — green rewarded ad button */
+.btn-ad-rewarded {
+  background: linear-gradient(135deg, #005522, #00aa55);
+  color: #ffffff;
+  box-shadow: 0 0 20px rgba(0,170,85,0.40), 0 4px 0 #003311;
+}
+.btn-ad-rewarded:hover {
+  box-shadow: 0 0 30px rgba(0,200,100,0.65), 0 4px 0 #003311;
+}
+.btn-ad-rewarded:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Interstitial modal — ad break icon */
+.ad-break-icon {
+  font-size: 40px;
+  line-height: 1;
+  opacity: 0.80;
+}
+
 /* Level Complete overlay */
 .levelcomplete-title {
   color: var(--neon-green);

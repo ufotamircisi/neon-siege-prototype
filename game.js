@@ -179,13 +179,15 @@ const Save = {
         if (!d.claimedMilestoneRewards) d.claimedMilestoneRewards = [];
         if (!d.audioPrefs) d.audioPrefs = { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false };
         if (!('diamonds' in d)) d.diamonds = 0;
+        if (!('noForcedAds' in d)) d.noForcedAds = false;
         return d;
       }
     } catch(e) {}
     return { bestStage: 0, totalShards: 0, permLevels: {}, stats: { ...DEFAULT_STATS }, achievements: {},
              highestUnlockedLevel: 1, completedLevels: [], levelBestScore: {}, pendingMilestonePowers: 0,
              bombCount: 3, multiplier10xCount: 3, claimedMilestoneRewards: [], diamonds: 0,
-             audioPrefs: { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false } };
+             audioPrefs: { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false },
+             noForcedAds: false };
   },
   save(data) {
     try { localStorage.setItem('neonSiegeSave', JSON.stringify(data)); } catch(e) {}
@@ -512,6 +514,36 @@ const AudioManager = (() => {
   };
   return am;
 })();
+
+// ============================================================
+// AD MANAGER  (Placeholder — no real SDK, no network calls)
+// ============================================================
+
+const AdManager = {
+  canShowInterstitial() {
+    return !(saveData.noForcedAds || false);
+  },
+
+  // Simulates a rewarded ad load + viewing delay, then calls onSuccess.
+  // In a real release: replace body with actual rewarded ad SDK call.
+  showRewardedPlaceholder(onSuccess) {
+    const btn = document.getElementById('btn-watch-ad-continue');
+    btn.textContent = '⏳ LOADING AD...';
+    btn.disabled = true;
+    setTimeout(() => { onSuccess(); }, 1500);
+  },
+
+  // Shows the interstitial placeholder modal; calls onContinue when player taps Continue.
+  // In a real release: replace body with actual interstitial ad SDK call.
+  showInterstitialPlaceholder(onContinue) {
+    const modal = document.getElementById('interstitial-modal');
+    modal.style.display = 'flex';
+    document.getElementById('btn-interstitial-continue').onclick = () => {
+      modal.style.display = 'none';
+      onContinue();
+    };
+  },
+};
 
 // ============================================================
 // CANVAS / RESIZE
@@ -1675,6 +1707,9 @@ class Game {
     this.turnLaserUsed    = false;
     this.turnElectricUsed = false;
 
+    // Ad state — reset each attempt so retry always gets a fresh rewarded continue slot
+    this.rewardedContinueUsed = false;
+
     // Initialize level layout (row 0 empty; pre-populated rows for higher levels)
     this._initLevelLayout();
 
@@ -2765,6 +2800,12 @@ class Game {
     document.getElementById('go-shards').textContent = this.shards;
     document.getElementById('go-best').textContent = saveData.bestStage;
 
+    // Rewarded continue: 1 use per attempt — hide if already used this attempt
+    const adBtn = document.getElementById('btn-watch-ad-continue');
+    adBtn.style.display = this.rewardedContinueUsed ? 'none' : 'block';
+    adBtn.textContent = '📺 WATCH AD TO CONTINUE';
+    adBtn.disabled = false;
+
     AudioManager.play('gameOver');
     setTimeout(() => Screens.show('gameover'), 700);
   }
@@ -3385,6 +3426,28 @@ document.getElementById('btn-menu-go').addEventListener('click', () => {
   Screens.show('menu');
 });
 
+document.getElementById('btn-watch-ad-continue').addEventListener('click', () => {
+  if (!game || game.rewardedContinueUsed) return;
+  AdManager.showRewardedPlaceholder(() => {
+    // Reward granted — clear the 3 lowest alive block rows then resume
+    game.rewardedContinueUsed = true;
+    const aliveRows = [...new Set(game.blocks.filter(b => b.alive).map(b => b.row))].sort((a, b) => b - a);
+    const targetRows = new Set(aliveRows.slice(0, 3));
+    for (const b of game.blocks) {
+      if (!b.alive || !targetRows.has(b.row)) continue;
+      b.alive = false;
+      spawnParticles(b.cx, b.cy, '#00ff88', 8, { speed: 3.5, decay: 0.05 });
+    }
+    game.blocks = game.blocks.filter(b => b.alive);
+    screenShake(6, 4);
+    floatingTexts.push(new FloatingText(W / 2, H * 0.43, '▶ CONTINUE!', '#00ff88'));
+    game.warningActive = false;
+    game.phase = GamePhase.IDLE;
+    game.updatePowerBar();
+    Screens.show('game');
+  });
+});
+
 // V6B: left = Bomb, right = 10x Multiplier, center = Recall
 document.getElementById('btn-lightning').addEventListener('click', () => {
   if (game) game.useBomb();
@@ -3405,8 +3468,16 @@ document.getElementById('btn-back-levelselect').addEventListener('click', () => 
 
 document.getElementById('btn-next-level').addEventListener('click', () => {
   const lv = game ? game.level : 1;
-  Screens.show('game');
-  game = new Game(lv + 1);
+  const nextLv = lv + 1;
+  if (lv % 5 === 0 && AdManager.canShowInterstitial()) {
+    AdManager.showInterstitialPlaceholder(() => {
+      Screens.show('game');
+      game = new Game(nextLv);
+    });
+  } else {
+    Screens.show('game');
+    game = new Game(nextLv);
+  }
 });
 
 document.getElementById('btn-goto-levelselect').addEventListener('click', () => {
