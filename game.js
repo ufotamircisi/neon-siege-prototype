@@ -3679,7 +3679,13 @@ document.getElementById('btn-reset-cancel').addEventListener('click', () => {
 });
 
 document.getElementById('btn-reset-confirm').addEventListener('click', () => {
+  const preservedAudio = saveData && saveData.audioPrefs
+    ? { ...saveData.audioPrefs }
+    : { sfxEnabled: true, musicEnabled: false, volume: 0.7, hapticsEnabled: false };
   localStorage.removeItem('neonSiegeSave');
+  saveData = Save.load();
+  saveData.audioPrefs = preservedAudio;
+  Save.save(saveData);
   location.reload();
 });
 
