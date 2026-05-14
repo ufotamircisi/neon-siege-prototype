@@ -10,7 +10,7 @@
 // ============================================================
 
 const COLS = 7;
-const BALL_SPEED = 9;
+const BALL_SPEED = 18;
 const BALL_RADIUS = 9;        // collision radius — never change
 const BALL_DRAW_RADIUS = 11;  // visual radius — reduced for cleaner multi-ball display (collision stays 9)
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
@@ -1461,9 +1461,38 @@ class Ball {
       return;
     }
 
-    // Normal bounce resolution
+    // Bounce resolution — triangle blocks use diagonal normal on their bevel face
     const bCX = block.cx, bCY = block.cy;
-    const dx = this.x - bCX, dy = this.y - bCY;
+    const dxC = this.x - bCX, dyC = this.y - bCY;
+
+    if (block.type === BlockType.TRIANGLE || block.type === BlockType.INV_TRI) {
+      // TRIANGLE: top-right bevel → outward normal (+1,−1)/√2
+      // INV_TRI:  bottom-left bevel → outward normal (−1,+1)/√2
+      // Apply diagonal reflection only when ball is in the bevel corner quadrant
+      // AND velocity is approaching the bevel (dot < 0).
+      const INV_SQRT2 = 0.7071067811865476;
+      let nx = 0, ny = 0;
+      if (block.type === BlockType.TRIANGLE && dxC > blockW * 0.2 && dyC < -blockH * 0.2) {
+        nx =  INV_SQRT2; ny = -INV_SQRT2;
+      } else if (block.type === BlockType.INV_TRI && dxC < -blockW * 0.2 && dyC > blockH * 0.2) {
+        nx = -INV_SQRT2; ny =  INV_SQRT2;
+      }
+      if (nx !== 0) {
+        const dot = this.vx * nx + this.vy * ny;
+        if (dot < 0) {
+          // Reflect velocity off the diagonal face
+          this.vx -= 2 * dot * nx;
+          this.vy -= 2 * dot * ny;
+          // Push ball away to prevent re-detection next frame
+          this.x += nx * BALL_RADIUS * 2;
+          this.y += ny * BALL_RADIUS * 2;
+          return;
+        }
+      }
+    }
+
+    // AABB bounce for flat faces and all non-bevel collisions
+    const dx = dxC, dy = dyC;
     const hw = blockW / 2 + BALL_RADIUS, hh = blockH / 2 + BALL_RADIUS;
     const overlapX = hw - Math.abs(dx), overlapY = hh - Math.abs(dy);
     if (overlapX < overlapY) {
@@ -1499,13 +1528,13 @@ class Ball {
     // Trail — scaled to BALL_DRAW_RADIUS for visibility
     for (let i = 0; i < this.trail.length; i++) {
       const t = this.trail[i];
-      const alpha = (i / this.trail.length) * 0.4;
+      const alpha = (i / this.trail.length) * 0.22;
       const r = BALL_DRAW_RADIUS * (i / this.trail.length);
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = tc;
       ctx.shadowColor = tc;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 3;
       ctx.beginPath();
       ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
       ctx.fill();
@@ -1515,7 +1544,7 @@ class Ball {
     // Ball — drawn at BALL_DRAW_RADIUS (bigger visual, same collision)
     ctx.save();
     ctx.shadowColor = tc;
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = 10;
     const grad = ctx.createRadialGradient(
       this.x - BALL_DRAW_RADIUS * 0.25, this.y - BALL_DRAW_RADIUS * 0.25, 1,
       this.x, this.y, BALL_DRAW_RADIUS
@@ -3131,18 +3160,14 @@ class Game {
   drawAimGuide(ctx) {
     const lx = this.launcher.x, ly = launcherY;
     const angle = this.launcher.angle;
-    const dx = Math.cos(angle), dy = Math.sin(angle);
     const barrelLen = 28;
-    const startX = lx + dx * barrelLen;
-    const startY = ly + dy * barrelLen;
 
-    const totalLen   = 280;  // total guide reach in px
-    const DOT_SPACE  = 13;   // distance between dot centres
-    const DOT_R1     = 2.4;  // primary segment dot radius
-    const DOT_R2     = DOT_R1; // secondary segment same size as primary for full readability
+    const TOTAL_LEN = 920;  // long enough for top bounce + return path
+    const DOT_SPACE = 14;
+    const DOT_R     = 2.4;
 
-    // ---- helper: draw dots along a segment ----
-    const drawDots = (x1, y1, x2, y2, alpha, radius) => {
+    // ---- draw dots along a segment, fading gently ----
+    const drawDots = (x1, y1, x2, y2, alpha) => {
       const segDx = x2 - x1, segDy = y2 - y1;
       const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
       if (segLen < 1) return;
@@ -3151,83 +3176,82 @@ class Game {
       ctx.save();
       ctx.shadowColor = '#00f5ff';
       ctx.shadowBlur  = 7;
-      ctx.fillStyle   = `rgba(0,245,255,${alpha})`;
+      ctx.fillStyle   = 'rgba(0,245,255,1)';
       for (let i = 0; i <= count; i++) {
-        const t  = i * DOT_SPACE;
-        const fx = alpha - (alpha * 0.35 * (t / (segLen || 1))); // gentle fade — keeps both segments readable
-        ctx.globalAlpha = Math.max(0.06, fx);
+        const t = i * DOT_SPACE;
+        ctx.globalAlpha = Math.max(0.04, alpha * (1 - 0.28 * (t / (segLen || 1))));
         ctx.beginPath();
-        ctx.arc(x1 + nx * t, y1 + ny * t, radius, 0, Math.PI * 2);
+        ctx.arc(x1 + nx * t, y1 + ny * t, DOT_R, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
     };
 
-    // ---- Find first block hit along the ray ----
+    // ---- ray vs block AABB detection (uses blockW/blockH globals) ----
     const rayHitsBlock = (rx, ry, rvx, rvy, maxDist) => {
-      // Step along the ray in coarse steps and test block bounding boxes
       const STEP = 6;
       const steps = Math.floor(maxDist / STEP);
       for (let i = 1; i <= steps; i++) {
-        const cx = rx + rvx * i * STEP;
-        const cy = ry + rvy * i * STEP;
+        const tx = rx + rvx * i * STEP, ty = ry + rvy * i * STEP;
         for (const b of this.blocks) {
           if (!b.alive) continue;
-          if (cx >= b.x - BALL_RADIUS && cx <= b.x + b.w + BALL_RADIUS &&
-              cy >= b.y - BALL_RADIUS && cy <= b.y + b.h + BALL_RADIUS) {
-            return i * STEP; // distance to hit
+          if (tx >= b.x - BALL_RADIUS && tx <= b.x + blockW + BALL_RADIUS &&
+              ty >= b.y - BALL_RADIUS && ty <= b.y + blockH + BALL_RADIUS) {
+            return i * STEP;
           }
         }
       }
-      return maxDist + 1; // no hit
+      return maxDist + 1;
     };
 
-    // ---- Compute wall bounce ----
-    let tWall = totalLen + 1;
-    if (dx < -0.001) tWall = (BALL_RADIUS - startX) / dx;
-    else if (dx > 0.001) tWall = (W - BALL_RADIUS - startX) / dx;
-    if (tWall < 0) tWall = totalLen + 1;
-
-    const distToWall = tWall < totalLen ? tWall : totalLen + 1;
+    // ---- multi-bounce simulation (up to 4 wall bounces) ----
+    let px = lx + Math.cos(angle) * barrelLen;
+    let py = ly + Math.sin(angle) * barrelLen;
+    let pvx = Math.cos(angle), pvy = Math.sin(angle);
+    let rem = TOTAL_LEN;
+    let alpha = 0.62;
 
     ctx.save();
-    ctx.globalAlpha = 1;
+    for (let bounce = 0; bounce < 5 && rem > 5; bounce++) {
+      // Distance to left/right wall
+      let tSide = rem + 1;
+      if (pvx < -0.001) tSide = (BALL_RADIUS - px) / pvx;
+      else if (pvx > 0.001) tSide = (W - BALL_RADIUS - px) / pvx;
+      if (tSide < 0) tSide = rem + 1;
 
-    if (distToWall < totalLen) {
-      // Segment 1: cannon tip → wall
-      const blockHit1 = rayHitsBlock(startX, startY, dx, dy, distToWall);
-      const seg1Len   = Math.min(distToWall, blockHit1);
-      const wx = startX + dx * seg1Len;
-      const wy = startY + dy * seg1Len;
-      drawDots(startX, startY, wx, wy, 0.52, DOT_R1);
+      // Distance to ceiling
+      let tCeil = rem + 1;
+      if (pvy < -0.001) tCeil = (BALL_RADIUS - py) / pvy;
+      if (tCeil < 0) tCeil = rem + 1;
 
-      // Wall bounce indicator (bright dot)
-      if (blockHit1 >= distToWall) {
-        ctx.save();
-        ctx.fillStyle  = 'rgba(0,245,255,0.70)';
-        ctx.shadowColor = '#00f5ff';
-        ctx.shadowBlur  = 14;
-        ctx.beginPath();
-        ctx.arc(wx, wy, 4.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+      const tNearest = Math.min(tSide, tCeil, rem);
+      const blockDist = rayHitsBlock(px, py, pvx, pvy, tNearest);
+      const segLen = Math.min(tNearest, blockDist);
 
-        // Segment 2: reflected path (fainter)
-        const rem   = totalLen - distToWall;
-        const rvx   = -dx; // horizontal reflection
-        const ex2   = wx + rvx * rem;
-        const ey2   = wy + dy * rem;
-        const blockHit2 = rayHitsBlock(wx, wy, rvx, dy, rem);
-        const seg2End = Math.min(rem, blockHit2);
-        drawDots(wx, wy, wx + rvx * seg2End, wy + dy * seg2End, 0.50, DOT_R2);
-      }
-    } else {
-      // No wall hit — straight dotted guide
-      const blockHit = rayHitsBlock(startX, startY, dx, dy, totalLen);
-      const endLen   = Math.min(totalLen, blockHit);
-      drawDots(startX, startY, startX + dx * endLen, startY + dy * endLen, 0.52, DOT_R1);
+      const ex = px + pvx * segLen;
+      const ey = py + pvy * segLen;
+      drawDots(px, py, ex, ey, alpha);
+
+      if (blockDist <= tNearest) break; // ray hit a block — stop guide
+      if (tNearest >= rem - 0.5) break; // exhausted total length
+
+      // Bounce indicator dot
+      ctx.save();
+      ctx.fillStyle   = `rgba(0,245,255,${Math.max(0.10, alpha * 0.85)})`;
+      ctx.shadowColor = '#00f5ff';
+      ctx.shadowBlur  = 14;
+      ctx.beginPath();
+      ctx.arc(ex, ey, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Reflect off the wall that was hit first
+      if (tSide <= tCeil) pvx = -pvx;
+      else                pvy = -pvy;
+      px = ex; py = ey;
+      rem -= segLen;
+      alpha *= 0.84;
     }
-
     ctx.restore();
   }
 }
