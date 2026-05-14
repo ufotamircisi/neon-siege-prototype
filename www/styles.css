@@ -320,6 +320,79 @@ html, body {
 }
 
 /* ============================
+   AIM RAIL — thumb slider
+   ============================ */
+
+#aim-rail-wrap {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 12px;
+  min-height: 58px;
+  background: rgba(2,4,20,0.97);
+  border-top: 1px solid rgba(0,245,255,0.08);
+  flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  box-sizing: border-box;
+}
+
+#aim-rail-left-label,
+#aim-rail-right-label {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: rgba(0,245,255,0.40);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+#aim-rail-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  background: rgba(0,245,255,0.12);
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(0,245,255,0.08);
+}
+
+#aim-rail-fill-left {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 50%;
+  background: rgba(0,245,255,0.25);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+#aim-rail-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #00f5ff 0%, #0055bb 60%, #001a44 100%);
+  border: 2px solid rgba(0,245,255,0.65);
+  box-shadow: 0 0 12px rgba(0,245,255,0.50), 0 0 4px rgba(0,245,255,0.25);
+  cursor: grab;
+  pointer-events: none;
+  touch-action: none;
+}
+
+#aim-rail-knob:active { cursor: grabbing; }
+
+/* Pulse when actively aiming */
+#aim-rail-wrap.rail-active #aim-rail-knob {
+  box-shadow: 0 0 20px rgba(0,245,255,0.75), 0 0 6px rgba(0,245,255,0.45);
+  border-color: rgba(0,245,255,0.90);
+}
+
+/* ============================
    POWER BAR — V6E neon redesign
    ============================ */
 

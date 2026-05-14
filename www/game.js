@@ -24,6 +24,12 @@ const MAX_ORBS = 2;         // max ball-pickup orbs on board simultaneously
 const ORB_SPAWN_CHANCE = 0.22; // probability of orb spawn per stage
 const TOTAL_LEVELS = 100;   // V6D: total generated levels
 
+// ---- Touch aiming constants ----
+const TOUCH_SENSITIVITY    = 0.78;  // fraction of raw angle delta applied per touch event
+const TOUCH_DEADZONE_PX    = 5;     // pixels — ignore touch moves smaller than this
+const TOUCH_MAX_DELTA      = 0.13;  // radians — max angle change per touch event (~7.5°)
+const TOUCH_MIN_AIM_DIST   = 110;   // pixels — enforce this min distance from cannon to avoid singularity
+
 // V6D: waves (block rows) to spawn per level — grows gradually, caps at 12
 function levelWaves(level) {
   return Math.min(3 + Math.floor(level * 0.4), 12);
@@ -558,13 +564,15 @@ let launcherY = 0;
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const parent = canvas.parentElement;
-  const hud = document.getElementById('hud');
+  const hud      = document.getElementById('hud');
   const powerBar = document.getElementById('power-bar');
+  const aimRail  = document.getElementById('aim-rail-wrap');
   const availW = Math.min(parent.clientWidth, 480);
-  // Measure actual HUD + power-bar heights so safe-area padding is included
-  const hudH = hud ? hud.offsetHeight : 52;
-  const barH = powerBar ? powerBar.offsetHeight : 80;
-  const availH = Math.max(parent.clientHeight - hudH - barH, 200);
+  // Measure actual heights so safe-area padding and aim rail are included
+  const hudH  = hud      ? hud.offsetHeight      : 52;
+  const barH  = powerBar ? powerBar.offsetHeight  : 80;
+  const railH = aimRail  ? aimRail.offsetHeight   : 52;
+  const availH = Math.max(parent.clientHeight - hudH - barH - railH, 200);
 
   W = availW;
   H = availH;
@@ -576,7 +584,7 @@ function resizeCanvas() {
 
   blockPad = 7;
   blockW = (W - blockPad * (COLS + 1)) / COLS;
-  blockH = blockW * 0.55;
+  blockH = blockW * 0.76;
   launcherY = H - 44; // V8: 4px lower → danger row shifts down one step
   // V7: danger line sits one block-row lower — blocks can come even closer to the cannon
   const rowH = blockH + blockPad;
@@ -803,21 +811,28 @@ class Block {
     ctx.shadowColor = colors.glow;
     ctx.shadowBlur = flash ? 20 : 8;
 
-    // Shape path — triangles get their own outline; squares keep roundRect
+    // Shape path — triangles: square tile with one bevel cut; squares: sharp roundRect
+    const _tCut = Math.min(blockW, blockH) * 0.52;
     if (this.type === BlockType.TRIANGLE) {
+      // Square tile with top-right corner cut (ramp/wedge look)
       ctx.beginPath();
-      ctx.moveTo(x + blockW / 2, y + 2);
-      ctx.lineTo(x + blockW - 2, y + blockH - 2);
-      ctx.lineTo(x + 2,          y + blockH - 2);
+      ctx.moveTo(x + 2,                   y + 2);
+      ctx.lineTo(x + blockW - 2 - _tCut,  y + 2);
+      ctx.lineTo(x + blockW - 2,           y + 2 + _tCut);
+      ctx.lineTo(x + blockW - 2,           y + blockH - 2);
+      ctx.lineTo(x + 2,                   y + blockH - 2);
       ctx.closePath();
     } else if (this.type === BlockType.INV_TRI) {
+      // Square tile with bottom-left corner cut (opposite ramp look)
       ctx.beginPath();
-      ctx.moveTo(x + 2,          y + 2);
-      ctx.lineTo(x + blockW - 2, y + 2);
-      ctx.lineTo(x + blockW / 2, y + blockH - 2);
+      ctx.moveTo(x + 2,                   y + 2);
+      ctx.lineTo(x + blockW - 2,           y + 2);
+      ctx.lineTo(x + blockW - 2,           y + blockH - 2);
+      ctx.lineTo(x + 2 + _tCut,           y + blockH - 2);
+      ctx.lineTo(x + 2,                   y + blockH - 2 - _tCut);
       ctx.closePath();
     } else {
-      roundRect(ctx, x, y, blockW, blockH, 6);
+      roundRect(ctx, x, y, blockW, blockH, 3);
     }
     ctx.fillStyle = flash ? '#ffffff33' : colors.fill;
     ctx.fill();
@@ -833,7 +848,7 @@ class Block {
       ctx.shadowColor = '#00ccff';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(0,200,255,0.5)';
-      roundRect(ctx, x - 3, y - 3, blockW + 6, blockH + 6, 9);
+      roundRect(ctx, x - 3, y - 3, blockW + 6, blockH + 6, 6);
       ctx.stroke();
     }
 
@@ -844,24 +859,22 @@ class Block {
       ctx.shadowBlur = 12;
       ctx.globalAlpha = 0.28;
       ctx.fillStyle = '#00ccff';
-      if (this.type === BlockType.TRIANGLE) {
-        ctx.beginPath(); ctx.moveTo(x+blockW/2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
-      } else if (this.type === BlockType.INV_TRI) {
-        ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW/2,y+blockH-2); ctx.closePath();
-      } else {
-        roundRect(ctx, x, y, blockW, blockH, 6);
-      }
+      const _fCut = Math.min(blockW, blockH) * 0.52;
+      const _drawTriPath = () => {
+        if (this.type === BlockType.TRIANGLE) {
+          ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2-_fCut,y+2); ctx.lineTo(x+blockW-2,y+2+_fCut); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
+        } else if (this.type === BlockType.INV_TRI) {
+          ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2+_fCut,y+blockH-2); ctx.lineTo(x+2,y+blockH-2-_fCut); ctx.closePath();
+        } else {
+          roundRect(ctx, x, y, blockW, blockH, 3);
+        }
+      };
+      _drawTriPath();
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.strokeStyle = 'rgba(0,200,255,0.75)';
       ctx.lineWidth = 1.5;
-      if (this.type === BlockType.TRIANGLE) {
-        ctx.beginPath(); ctx.moveTo(x+blockW/2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
-      } else if (this.type === BlockType.INV_TRI) {
-        ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW/2,y+blockH-2); ctx.closePath();
-      } else {
-        roundRect(ctx, x, y, blockW, blockH, 6);
-      }
+      _drawTriPath();
       ctx.stroke();
       ctx.restore();
     }
@@ -892,7 +905,7 @@ class Block {
       ctx.fillText(this.hp, x + blockW / 2, y + blockH / 2 + 7);
     } else {
       const ratio = this.hp / this.maxHp;
-      ctx.font = `bold ${blockH > 28 ? 13 : 10}px 'Courier New'`;
+      ctx.font = `bold ${blockH > 28 ? 15 : 10}px 'Courier New'`;
       ctx.fillStyle = flash ? '#fff' : (ratio > 0.5 ? '#fff' : '#ff8888');
       ctx.shadowColor = colors.glow;
       ctx.shadowBlur = 4;
@@ -1529,15 +1542,41 @@ class Launcher {
     this.targetAngle = -Math.PI / 2; // V7B: pointer sets this; draw follows smoothly
     this.minAngle = -Math.PI + 0.18;
     this.maxAngle = -0.18;
+    this.railControlled = false; // true while the aim rail is being dragged
   }
 
-  setAngleFromPoint(px, py) {
+  setAngleFromPoint(px, py, isTouch = false) {
     const dx = px - this.x;
     const dy = py - launcherY;
-    let a = Math.atan2(dy, dx);
-    // clamp: only allow upward angles
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Enforce minimum effective distance — prevents extreme angle swings when
+    // the finger is very close to the cannon vertically (atan2 singularity zone).
+    let aDx = dx, aDy = dy;
+    // If touch is at or below cannon level, project upward so aim is still meaningful.
+    // This makes the cannon area forgiving — touching on/below cannon aims based on
+    // horizontal finger position rather than snapping to a clamped extreme.
+    if (aDy > -20) {
+      aDy = -TOUCH_MIN_AIM_DIST;
+    } else if (dist > 0.5 && dist < TOUCH_MIN_AIM_DIST) {
+      const s = TOUCH_MIN_AIM_DIST / dist;
+      aDx = dx * s; aDy = dy * s;
+    }
+
+    let a = Math.atan2(aDy, aDx);
     a = clamp(a, this.minAngle, this.maxAngle);
-    this.targetAngle = a; // V7B: drive the smooth follower, not angle directly
+
+    if (isTouch) {
+      // Apply sensitivity: limit per-event delta so fast swipes don't jump instantly.
+      const rawDelta = a - this.targetAngle;
+      const clamped  = clamp(rawDelta, -TOUCH_MAX_DELTA, TOUCH_MAX_DELTA);
+      this.targetAngle = clamp(
+        this.targetAngle + clamped * TOUCH_SENSITIVITY,
+        this.minAngle, this.maxAngle
+      );
+    } else {
+      this.targetAngle = a;
+    }
   }
 
   // V7B: smooth follow — called every frame; gives mobile-shooter "springy" feel
@@ -1546,7 +1585,10 @@ class Launcher {
     if (Math.abs(diff) < 0.0015) {
       this.angle = this.targetAngle; // snap when negligibly close (prevents jitter)
     } else {
-      this.angle = lerp(this.angle, this.targetAngle, 0.22); // V8: slightly springier drag feel
+      // Rail: near-instant lerp (0.90) so knob tracks finger with no perceptible lag.
+      // Canvas drag: springy feel (0.22).
+      const t = this.railControlled ? 0.90 : 0.22;
+      this.angle = lerp(this.angle, this.targetAngle, t);
     }
   }
 
@@ -1557,7 +1599,7 @@ class Launcher {
 
   draw(ctx) {
     const lx = this.x, ly = launcherY;
-    const len = 40;
+    const len = 28;
     const ex = lx + Math.cos(this.angle) * len;
     const ey = ly + Math.sin(this.angle) * len;
 
@@ -3084,68 +3126,108 @@ class Game {
     floatingTexts = floatingTexts.filter(ft => !ft.dead);
   }
 
-  // ---- Aim guide with single wall-bounce prediction ----
+  // ---- Aim guide — dotted trajectory with wall-bounce prediction ----
 
   drawAimGuide(ctx) {
     const lx = this.launcher.x, ly = launcherY;
     const angle = this.launcher.angle;
     const dx = Math.cos(angle), dy = Math.sin(angle);
-    const barrelLen = 42;
-    let x = lx + dx * barrelLen;
-    let y = ly + dy * barrelLen;
-    let vx = dx, vy = dy;
+    const barrelLen = 28;
+    const startX = lx + dx * barrelLen;
+    const startY = ly + dy * barrelLen;
 
-    const totalLen = 260; // total guide length in px
+    const totalLen   = 280;  // total guide reach in px
+    const DOT_SPACE  = 13;   // distance between dot centres
+    const DOT_R1     = 2.4;  // primary segment dot radius
+    const DOT_R2     = DOT_R1; // secondary segment same size as primary for full readability
+
+    // ---- helper: draw dots along a segment ----
+    const drawDots = (x1, y1, x2, y2, alpha, radius) => {
+      const segDx = x2 - x1, segDy = y2 - y1;
+      const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+      if (segLen < 1) return;
+      const nx = segDx / segLen, ny = segDy / segLen;
+      const count = Math.floor(segLen / DOT_SPACE);
+      ctx.save();
+      ctx.shadowColor = '#00f5ff';
+      ctx.shadowBlur  = 7;
+      ctx.fillStyle   = `rgba(0,245,255,${alpha})`;
+      for (let i = 0; i <= count; i++) {
+        const t  = i * DOT_SPACE;
+        const fx = alpha - (alpha * 0.35 * (t / (segLen || 1))); // gentle fade — keeps both segments readable
+        ctx.globalAlpha = Math.max(0.06, fx);
+        ctx.beginPath();
+        ctx.arc(x1 + nx * t, y1 + ny * t, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    // ---- Find first block hit along the ray ----
+    const rayHitsBlock = (rx, ry, rvx, rvy, maxDist) => {
+      // Step along the ray in coarse steps and test block bounding boxes
+      const STEP = 6;
+      const steps = Math.floor(maxDist / STEP);
+      for (let i = 1; i <= steps; i++) {
+        const cx = rx + rvx * i * STEP;
+        const cy = ry + rvy * i * STEP;
+        for (const b of this.blocks) {
+          if (!b.alive) continue;
+          if (cx >= b.x - BALL_RADIUS && cx <= b.x + b.w + BALL_RADIUS &&
+              cy >= b.y - BALL_RADIUS && cy <= b.y + b.h + BALL_RADIUS) {
+            return i * STEP; // distance to hit
+          }
+        }
+      }
+      return maxDist + 1; // no hit
+    };
+
+    // ---- Compute wall bounce ----
+    let tWall = totalLen + 1;
+    if (dx < -0.001) tWall = (BALL_RADIUS - startX) / dx;
+    else if (dx > 0.001) tWall = (W - BALL_RADIUS - startX) / dx;
+    if (tWall < 0) tWall = totalLen + 1;
+
+    const distToWall = tWall < totalLen ? tWall : totalLen + 1;
 
     ctx.save();
-    ctx.setLineDash([6, 9]);
-    ctx.lineWidth = 1.5;
-
-    // Find distance to nearest vertical wall
-    let tWall = Infinity;
-    if (vx < -0.001) tWall = (BALL_RADIUS - x) / vx;
-    else if (vx > 0.001) tWall = (W - BALL_RADIUS - x) / vx;
-
-    const distToWall = tWall < Infinity ? tWall : totalLen + 1;
+    ctx.globalAlpha = 1;
 
     if (distToWall < totalLen) {
-      // Segment 1: launcher tip → wall
-      const wx = x + vx * distToWall;
-      const wy = y + vy * distToWall;
-      ctx.strokeStyle = 'rgba(0,245,255,0.38)';
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(wx, wy);
-      ctx.stroke();
+      // Segment 1: cannon tip → wall
+      const blockHit1 = rayHitsBlock(startX, startY, dx, dy, distToWall);
+      const seg1Len   = Math.min(distToWall, blockHit1);
+      const wx = startX + dx * seg1Len;
+      const wy = startY + dy * seg1Len;
+      drawDots(startX, startY, wx, wy, 0.52, DOT_R1);
 
-      // Wall bounce dot
-      ctx.save();
-      ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(0,245,255,0.55)';
-      ctx.shadowColor = '#00f5ff';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(wx, wy, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      // Wall bounce indicator (bright dot)
+      if (blockHit1 >= distToWall) {
+        ctx.save();
+        ctx.fillStyle  = 'rgba(0,245,255,0.70)';
+        ctx.shadowColor = '#00f5ff';
+        ctx.shadowBlur  = 14;
+        ctx.beginPath();
+        ctx.arc(wx, wy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
 
-      // Segment 2: reflected path (fainter)
-      const rem = totalLen - distToWall;
-      ctx.strokeStyle = 'rgba(0,245,255,0.16)';
-      ctx.beginPath();
-      ctx.moveTo(wx, wy);
-      ctx.lineTo(wx - vx * rem, wy + vy * rem);
-      ctx.stroke();
+        // Segment 2: reflected path (fainter)
+        const rem   = totalLen - distToWall;
+        const rvx   = -dx; // horizontal reflection
+        const ex2   = wx + rvx * rem;
+        const ey2   = wy + dy * rem;
+        const blockHit2 = rayHitsBlock(wx, wy, rvx, dy, rem);
+        const seg2End = Math.min(rem, blockHit2);
+        drawDots(wx, wy, wx + rvx * seg2End, wy + dy * seg2End, 0.50, DOT_R2);
+      }
     } else {
-      // No wall hit in range — simple straight guide
-      ctx.strokeStyle = 'rgba(0,245,255,0.38)';
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + vx * totalLen, y + vy * totalLen);
-      ctx.stroke();
+      // No wall hit — straight dotted guide
+      const blockHit = rayHitsBlock(startX, startY, dx, dy, totalLen);
+      const endLen   = Math.min(totalLen, blockHit);
+      drawDots(startX, startY, startX + dx * endLen, startY + dy * endLen, 0.52, DOT_R1);
     }
 
-    ctx.setLineDash([]);
     ctx.restore();
   }
 }
@@ -3326,14 +3408,20 @@ function buildPermUpgradeList() {
 
 let game = null;
 
+// Track last touch position for deadzone
+let _touchLastPos = null;
+
 function getCanvasPos(e) {
   const rect = canvas.getBoundingClientRect();
   // Return CSS-pixel coords — these match W/H used throughout game logic.
   // DPR scaling is handled by ctx.setTransform in draw(), not here.
   let cx, cy;
-  if (e.touches) {
+  if (e.touches && e.touches.length > 0) {
     cx = e.touches[0].clientX - rect.left;
     cy = e.touches[0].clientY - rect.top;
+  } else if (e.changedTouches && e.changedTouches.length > 0) {
+    cx = e.changedTouches[0].clientX - rect.left;
+    cy = e.changedTouches[0].clientY - rect.top;
   } else {
     cx = e.clientX - rect.left;
     cy = e.clientY - rect.top;
@@ -3346,21 +3434,36 @@ function onPointerDown(e) {
   if (!game || game.phase !== GamePhase.IDLE) return;
   e.preventDefault();
   const pos = getCanvasPos(e);
-  // Touch anywhere on canvas → aim; cannon position is managed automatically
+  const isTouch = !!e.touches;
+  _touchLastPos = isTouch ? pos : null;
   game.aiming = true;
-  game.launcher.setAngleFromPoint(pos.x, pos.y);
+  game.launcher.setAngleFromPoint(pos.x, pos.y, isTouch);
 }
 
 function onPointerMove(e) {
   if (!game || !game.aiming) return;
   e.preventDefault();
   const pos = getCanvasPos(e);
-  game.launcher.setAngleFromPoint(pos.x, pos.y);
+  const isTouch = !!e.touches;
+
+  if (isTouch) {
+    // Apply deadzone — ignore tiny finger tremors
+    if (_touchLastPos) {
+      const ddx = Math.abs(pos.x - _touchLastPos.x);
+      const ddy = Math.abs(pos.y - _touchLastPos.y);
+      if (ddx < TOUCH_DEADZONE_PX && ddy < TOUCH_DEADZONE_PX) return;
+    }
+    _touchLastPos = pos;
+    game.launcher.setAngleFromPoint(pos.x, pos.y, true);
+  } else {
+    game.launcher.setAngleFromPoint(pos.x, pos.y, false);
+  }
 }
 
 function onPointerUp(e) {
   if (!game || !game.aiming) return;
   e.preventDefault();
+  _touchLastPos = null;
   game.aiming = false;
   game.shoot();
   game.updatePowerBar();
@@ -3368,10 +3471,97 @@ function onPointerUp(e) {
 
 canvas.addEventListener('mousedown', onPointerDown);
 canvas.addEventListener('mousemove', onPointerMove);
-canvas.addEventListener('mouseup', onPointerUp);
+canvas.addEventListener('mouseup',   onPointerUp);
 canvas.addEventListener('touchstart', onPointerDown, { passive: false });
-canvas.addEventListener('touchmove', onPointerMove, { passive: false });
-canvas.addEventListener('touchend', onPointerUp, { passive: false });
+canvas.addEventListener('touchmove',  onPointerMove, { passive: false });
+canvas.addEventListener('touchend',   onPointerUp,   { passive: false });
+
+// ============================================================
+// AIM RAIL — horizontal thumb slider
+// ============================================================
+
+const aimRailWrap  = document.getElementById('aim-rail-wrap');
+const aimRailKnob  = document.getElementById('aim-rail-fill-left');
+const aimRailTrack = document.getElementById('aim-rail-track');
+
+let _railDragging = false;
+
+// Map launcher angle to knob position (0–100%) and fill width.
+// Uses inverse of center-based mapping: 0% = full left, 50% = straight up, 100% = full right.
+function syncRailKnob() {
+  if (!game || !game.launcher) return;
+  const visible = (game.phase === GamePhase.IDLE || game.phase === GamePhase.SHOOTING);
+  aimRailWrap.style.display = visible ? 'flex' : 'none';
+  if (!visible) return;
+
+  // Inverse: aimValue = (angle - straightUp) / maxOffset → pct = (aimValue+1)/2
+  const aimValue = clamp((game.launcher.angle - RAIL_STRAIGHT_UP) / RAIL_MAX_OFFSET, -1, 1);
+  const pct = ((aimValue + 1) / 2) * 100;
+  document.getElementById('aim-rail-knob').style.left = pct + '%';
+  aimRailKnob.style.width = pct + '%';
+}
+
+// Rail angle constants — center of rail = straight up, edges = max left/right aim.
+const RAIL_STRAIGHT_UP = -Math.PI / 2;  // -1.5708 rad
+const RAIL_MAX_OFFSET  = 1.30;          // ~74.5° from vertical on each side
+const RAIL_BOOST       = 1.35;          // full range reachable before screen edge (no need to reach extreme pixel)
+
+// Center-based absolute mapping: finger position → aimValue → angle.
+//   normalized -1 = far left  → aims left
+//   normalized  0 = center    → aims straight up
+//   normalized +1 = far right → aims right
+function setAngleFromRailX(clientX) {
+  const rect      = aimRailTrack.getBoundingClientRect();
+  const centerX   = rect.left + rect.width * 0.5;
+  const halfW     = (rect.width * 0.5) || 1;
+  const normalized = clamp(((clientX - centerX) / halfW) * RAIL_BOOST, -1, 1);
+  game.launcher.targetAngle = clamp(
+    RAIL_STRAIGHT_UP + normalized * RAIL_MAX_OFFSET,
+    game.launcher.minAngle,
+    game.launcher.maxAngle
+  );
+}
+
+function onRailDown(e) {
+  if (!game || game.phase !== GamePhase.IDLE) return;
+  e.preventDefault();
+  AudioManager.init();
+  _railDragging = true;
+  game.launcher.railControlled = true;
+  game.aiming = false;
+  aimRailWrap.classList.add('rail-active');
+  // Immediately snap aim to the touched position — no delta accumulation
+  setAngleFromRailX(e.touches ? e.touches[0].clientX : e.clientX);
+}
+
+function onRailMove(e) {
+  if (!_railDragging || !game || game.phase !== GamePhase.IDLE) return;
+  e.preventDefault();
+  setAngleFromRailX(e.touches ? e.touches[0].clientX : e.clientX);
+}
+
+function onRailUp(e) {
+  if (!_railDragging) return;
+  e.preventDefault();
+  _railDragging = false;
+  aimRailWrap.classList.remove('rail-active');
+  if (game && game.launcher) game.launcher.railControlled = false;
+  if (game && game.phase === GamePhase.IDLE) {
+    game.shoot();
+    game.updatePowerBar();
+  }
+}
+
+aimRailWrap.addEventListener('mousedown',  onRailDown);
+aimRailWrap.addEventListener('mousemove',  onRailMove);
+aimRailWrap.addEventListener('mouseup',    onRailUp);
+aimRailWrap.addEventListener('touchstart', onRailDown, { passive: false });
+aimRailWrap.addEventListener('touchmove',  onRailMove, { passive: false });
+aimRailWrap.addEventListener('touchend',   onRailUp,   { passive: false });
+
+// Release rail if pointer leaves window
+document.addEventListener('mouseup',  () => { if (_railDragging) { _railDragging = false; aimRailWrap.classList.remove('rail-active'); } });
+document.addEventListener('touchend', () => { if (_railDragging) { _railDragging = false; aimRailWrap.classList.remove('rail-active'); } });
 
 // ============================================================
 // BUTTON WIRING
@@ -3707,6 +3897,7 @@ function gameLoop() {
   if (showingGame && game) {
     game.update();
     game.draw();
+    syncRailKnob();
   }
 }
 
