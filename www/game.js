@@ -10,7 +10,7 @@
 // ============================================================
 
 const COLS = 7;
-const BALL_SPEED = 18;
+const BALL_SPEED = 14;
 const BALL_RADIUS = 9;        // collision radius — never change
 const BALL_DRAW_RADIUS = 11;  // visual radius — reduced for cleaner multi-ball display (collision stays 9)
 const BLOCK_ROWS_MAX = 12;  // rows visible at once
@@ -27,7 +27,7 @@ const TOTAL_LEVELS = 100;   // V6D: total generated levels
 // ---- Touch aiming constants ----
 const TOUCH_SENSITIVITY    = 0.78;  // fraction of raw angle delta applied per touch event
 const TOUCH_DEADZONE_PX    = 5;     // pixels — ignore touch moves smaller than this
-const TOUCH_MAX_DELTA      = 0.13;  // radians — max angle change per touch event (~7.5°)
+const TOUCH_MAX_DELTA      = 0.18;  // radians — max angle change per touch event (~10.3°)
 const TOUCH_MIN_AIM_DIST   = 110;   // pixels — enforce this min distance from cannon to avoid singularity
 
 // V6D: waves (block rows) to spawn per level — grows gradually, caps at 12
@@ -585,11 +585,12 @@ function resizeCanvas() {
   blockPad = 7;
   blockW = (W - blockPad * (COLS + 1)) / COLS;
   blockH = blockW * 0.76;
-  launcherY = H - 44; // V8: 4px lower → danger row shifts down one step
-  // V7: danger line sits one block-row lower — blocks can come even closer to the cannon
   const rowH = blockH + blockPad;
-  DANGER_ROW  = Math.max(13, Math.floor((launcherY - blockPad) / rowH));
-  WARNING_ROW = DANGER_ROW - 1; // one row above lose line = warning flash
+  // Danger row derived from H directly (one row lower than before: numerator H-51 vs old H-87).
+  // launcherY is then placed 36px below the danger line so cannon is always visually below it.
+  DANGER_ROW  = Math.max(6, Math.floor((H - 44 - blockPad) / rowH));
+  WARNING_ROW = DANGER_ROW - 1;
+  launcherY   = Math.min(H - 16, blockPad + DANGER_ROW * rowH + 36);
 }
 
 // ============================================================
@@ -630,16 +631,19 @@ class Particle {
 }
 
 let particles = [];
+const MAX_PARTICLES = 180;
 
 function spawnParticles(x, y, color, count = 10, opts = {}) {
-  for (let i = 0; i < count; i++) {
+  if (particles.length >= MAX_PARTICLES) return;
+  const add = Math.min(count, MAX_PARTICLES - particles.length);
+  for (let i = 0; i < add; i++) {
     particles.push(new Particle(x, y, color, opts));
   }
 }
 
 function spawnExplosionParticles(x, y, color) {
-  spawnParticles(x, y, color, 16, { speed: 5, decay: 0.03, size: 3.5 });
-  spawnParticles(x, y, '#ffffff', 6, { speed: 7, decay: 0.05, size: 2 });
+  spawnParticles(x, y, color, 10, { speed: 5, decay: 0.03, size: 3.5 });
+  spawnParticles(x, y, '#ffffff', 4, { speed: 7, decay: 0.05, size: 2 });
 }
 
 // ============================================================
@@ -811,25 +815,20 @@ class Block {
     ctx.shadowColor = colors.glow;
     ctx.shadowBlur = flash ? 20 : 8;
 
-    // Shape path — triangles: square tile with one bevel cut; squares: sharp roundRect
-    const _tCut = Math.min(blockW, blockH) * 0.52;
+    // Shape path — triangles: right-triangle "set-square" tiles; squares: sharp roundRect
     if (this.type === BlockType.TRIANGLE) {
-      // Square tile with top-right corner cut (ramp/wedge look)
+      // Lower-left right triangle: right angle at bottom-left, hypotenuse top-left→bottom-right
       ctx.beginPath();
-      ctx.moveTo(x + 2,                   y + 2);
-      ctx.lineTo(x + blockW - 2 - _tCut,  y + 2);
-      ctx.lineTo(x + blockW - 2,           y + 2 + _tCut);
-      ctx.lineTo(x + blockW - 2,           y + blockH - 2);
-      ctx.lineTo(x + 2,                   y + blockH - 2);
+      ctx.moveTo(x + 2,          y + 2);
+      ctx.lineTo(x + blockW - 2, y + blockH - 2);
+      ctx.lineTo(x + 2,          y + blockH - 2);
       ctx.closePath();
     } else if (this.type === BlockType.INV_TRI) {
-      // Square tile with bottom-left corner cut (opposite ramp look)
+      // Upper-right right triangle: right angle at top-right, hypotenuse top-left→bottom-right
       ctx.beginPath();
-      ctx.moveTo(x + 2,                   y + 2);
-      ctx.lineTo(x + blockW - 2,           y + 2);
-      ctx.lineTo(x + blockW - 2,           y + blockH - 2);
-      ctx.lineTo(x + 2 + _tCut,           y + blockH - 2);
-      ctx.lineTo(x + 2,                   y + blockH - 2 - _tCut);
+      ctx.moveTo(x + 2,          y + 2);
+      ctx.lineTo(x + blockW - 2, y + 2);
+      ctx.lineTo(x + blockW - 2, y + blockH - 2);
       ctx.closePath();
     } else {
       roundRect(ctx, x, y, blockW, blockH, 3);
@@ -859,12 +858,11 @@ class Block {
       ctx.shadowBlur = 12;
       ctx.globalAlpha = 0.28;
       ctx.fillStyle = '#00ccff';
-      const _fCut = Math.min(blockW, blockH) * 0.52;
       const _drawTriPath = () => {
         if (this.type === BlockType.TRIANGLE) {
-          ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2-_fCut,y+2); ctx.lineTo(x+blockW-2,y+2+_fCut); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2,y+blockH-2); ctx.closePath();
+          ctx.beginPath(); ctx.moveTo(x+2, y+2); ctx.lineTo(x+blockW-2, y+blockH-2); ctx.lineTo(x+2, y+blockH-2); ctx.closePath();
         } else if (this.type === BlockType.INV_TRI) {
-          ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+blockW-2,y+2); ctx.lineTo(x+blockW-2,y+blockH-2); ctx.lineTo(x+2+_fCut,y+blockH-2); ctx.lineTo(x+2,y+blockH-2-_fCut); ctx.closePath();
+          ctx.beginPath(); ctx.moveTo(x+2, y+2); ctx.lineTo(x+blockW-2, y+2); ctx.lineTo(x+blockW-2, y+blockH-2); ctx.closePath();
         } else {
           roundRect(ctx, x, y, blockW, blockH, 3);
         }
@@ -909,7 +907,13 @@ class Block {
       ctx.fillStyle = flash ? '#fff' : (ratio > 0.5 ? '#fff' : '#ff8888');
       ctx.shadowColor = colors.glow;
       ctx.shadowBlur = 4;
-      ctx.fillText(this.hp, x + blockW / 2, y + blockH / 2);
+      const labelX = this.type === BlockType.TRIANGLE ? x + blockW * 0.33
+                   : this.type === BlockType.INV_TRI   ? x + blockW * 0.67
+                   : x + blockW / 2;
+      const labelY = this.type === BlockType.TRIANGLE ? y + blockH * 0.65
+                   : this.type === BlockType.INV_TRI   ? y + blockH * 0.35
+                   : y + blockH / 2;
+      ctx.fillText(this.hp, labelX, labelY);
     }
     ctx.restore();
 
@@ -1504,7 +1508,7 @@ class Ball {
     }
   }
 
-  draw(ctx) {
+  draw(ctx, showTrail = true) {
     if (!this.active) return;
 
     // Returning: small glowing orb sliding along the bottom toward cannon
@@ -1525,26 +1529,25 @@ class Ball {
     const bc2 = this.element === 'fire' ? '#ff4400' : this.element === 'ice' ? '#aaeeff' : this.element === 'electric' ? '#8822ff' : '#00f5ff';
     const bc3 = this.element === 'fire' ? '#cc0000' : this.element === 'ice' ? '#0066aa' : this.element === 'electric' ? '#330088' : '#0033cc';
 
-    // Trail — scaled to BALL_DRAW_RADIUS for visibility
-    for (let i = 0; i < this.trail.length; i++) {
-      const t = this.trail[i];
-      const alpha = (i / this.trail.length) * 0.22;
-      const r = BALL_DRAW_RADIUS * (i / this.trail.length);
+    // Trail — single save/restore, no per-dot shadow (avoids 7× shadowBlur compositing per ball)
+    if (showTrail && this.trail.length > 0) {
       ctx.save();
-      ctx.globalAlpha = alpha;
       ctx.fillStyle = tc;
-      ctx.shadowColor = tc;
-      ctx.shadowBlur = 3;
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.shadowBlur = 0;
+      for (let i = 0; i < this.trail.length; i++) {
+        ctx.globalAlpha = (i / this.trail.length) * 0.18;
+        const r = BALL_DRAW_RADIUS * (i / this.trail.length);
+        ctx.beginPath();
+        ctx.arc(this.trail[i].x, this.trail[i].y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
     // Ball — drawn at BALL_DRAW_RADIUS (bigger visual, same collision)
     ctx.save();
     ctx.shadowColor = tc;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 8;
     const grad = ctx.createRadialGradient(
       this.x - BALL_DRAW_RADIUS * 0.25, this.y - BALL_DRAW_RADIUS * 0.25, 1,
       this.x, this.y, BALL_DRAW_RADIUS
@@ -1569,8 +1572,8 @@ class Launcher {
     this.x = W / 2;
     this.angle       = -Math.PI / 2; // current displayed angle (lerped)
     this.targetAngle = -Math.PI / 2; // V7B: pointer sets this; draw follows smoothly
-    this.minAngle = -Math.PI + 0.18;
-    this.maxAngle = -0.18;
+    this.minAngle = -Math.PI + 0.07;
+    this.maxAngle = -0.07;
     this.railControlled = false; // true while the aim rail is being dragged
   }
 
@@ -1586,7 +1589,10 @@ class Launcher {
     // This makes the cannon area forgiving — touching on/below cannon aims based on
     // horizontal finger position rather than snapping to a clamped extreme.
     if (aDy > -20) {
-      aDy = -TOUCH_MIN_AIM_DIST;
+      // Use a small forced-upward offset so far-sideways touches still reach near-horizontal angles.
+      // Was -TOUCH_MIN_AIM_DIST (-110): that capped practical max angle at ~32° from horizontal.
+      // With -45: atan2(-45, 175px) ≈ -14° from horizontal — much more sideways reachable.
+      aDy = -45;
     } else if (dist > 0.5 && dist < TOUCH_MIN_AIM_DIST) {
       const s = TOUCH_MIN_AIM_DIST / dist;
       aDx = dx * s; aDy = dy * s;
@@ -1628,7 +1634,7 @@ class Launcher {
 
   draw(ctx) {
     const lx = this.x, ly = launcherY;
-    const len = 28;
+    const len = 22;
     const ex = lx + Math.cos(this.angle) * len;
     const ey = ly + Math.sin(this.angle) * len;
 
@@ -2985,10 +2991,13 @@ class Game {
       }
     }
 
-    const activeBalls = this.balls.filter(b => b.active);
-    if (activeBalls.length === 0 && this.balls.length > 0 && this.pendingBalls === 0) {
-      this.balls = [];
-      this.processTurnEnd();
+    if (this.balls.length > 0 && this.pendingBalls === 0) {
+      let _anyActive = false;
+      for (const b of this.balls) { if (b.active) { _anyActive = true; break; } }
+      if (!_anyActive) {
+        this.balls = [];
+        this.processTurnEnd();
+      }
     }
   }
 
@@ -3015,16 +3024,14 @@ class Game {
     ctx.fillStyle = '#060818';
     ctx.fillRect(-sx, -sy, W, H);
 
-    // Subtle grid
+    // Subtle grid — single batched path (one stroke call instead of ~35)
     ctx.strokeStyle = 'rgba(0,100,200,0.06)';
     ctx.lineWidth = 1;
     const gSep = 40;
-    for (let gx = 0; gx < W; gx += gSep) {
-      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
-    }
-    for (let gy = 0; gy < H; gy += gSep) {
-      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
-    }
+    ctx.beginPath();
+    for (let gx = 0; gx < W; gx += gSep) { ctx.moveTo(gx, 0); ctx.lineTo(gx, H); }
+    for (let gy = 0; gy < H; gy += gSep) { ctx.moveTo(0, gy); ctx.lineTo(W, gy); }
+    ctx.stroke();
 
     // Warning row line (amber — one row before game over)
     const warningY = blockPad + WARNING_ROW * (blockH + blockPad);
@@ -3068,9 +3075,10 @@ class Game {
       ctx.restore();
     }
 
-    // Balls
+    // Balls — skip trail when many balls are active (10x shot) to keep frame budget
+    const _showBallTrail = this.balls.length <= 30;
     for (const ball of this.balls) {
-      ball.draw(ctx);
+      ball.draw(ctx, _showBallTrail);
     }
 
     // Aim guide (always visible in IDLE)
@@ -3105,7 +3113,11 @@ class Game {
       ctx.restore();
       lb.life--;
     }
-    laserBeams = laserBeams.filter(lb => lb.life > 0);
+    let _li = 0;
+    for (let _i = 0; _i < laserBeams.length; _i++) {
+      if (laserBeams[_i].life > 0) laserBeams[_li++] = laserBeams[_i];
+    }
+    laserBeams.length = _li;
 
     // Particles
     for (const p of particles) { p.draw(ctx); }
@@ -3146,13 +3158,22 @@ class Game {
       ctx.restore();
     }
 
-    // Update particles
+    // Update + compact particles (in-place — avoids new array allocation each frame)
     for (const p of particles) p.update();
-    particles = particles.filter(p => !p.dead);
+    let _pi = 0;
+    for (let _i = 0; _i < particles.length; _i++) {
+      if (!particles[_i].dead) particles[_pi++] = particles[_i];
+    }
+    particles.length = _pi;
 
-    // Update floating texts
+    // Update + compact floating texts (in-place; cap at 10 to prevent storm-of-texts freeze)
     for (const ft of floatingTexts) ft.update();
-    floatingTexts = floatingTexts.filter(ft => !ft.dead);
+    let _fi = 0;
+    for (let _i = 0; _i < floatingTexts.length; _i++) {
+      if (!floatingTexts[_i].dead) floatingTexts[_fi++] = floatingTexts[_i];
+    }
+    floatingTexts.length = _fi;
+    if (floatingTexts.length > 10) floatingTexts.splice(0, floatingTexts.length - 10);
   }
 
   // ---- Aim guide — dotted trajectory with wall-bounce prediction ----
@@ -3160,11 +3181,11 @@ class Game {
   drawAimGuide(ctx) {
     const lx = this.launcher.x, ly = launcherY;
     const angle = this.launcher.angle;
-    const barrelLen = 28;
+    const barrelLen = 22;
 
-    const TOTAL_LEN = 920;  // long enough for top bounce + return path
+    const TOTAL_LEN = 480;
     const DOT_SPACE = 14;
-    const DOT_R     = 2.4;
+    const DOT_R     = 1.8;
 
     // ---- draw dots along a segment, fading gently ----
     const drawDots = (x1, y1, x2, y2, alpha) => {
@@ -3174,9 +3195,9 @@ class Game {
       const nx = segDx / segLen, ny = segDy / segLen;
       const count = Math.floor(segLen / DOT_SPACE);
       ctx.save();
-      ctx.shadowColor = '#00f5ff';
-      ctx.shadowBlur  = 7;
-      ctx.fillStyle   = 'rgba(0,245,255,1)';
+      ctx.shadowColor = '#aaccff';
+      ctx.shadowBlur  = 3;
+      ctx.fillStyle   = 'rgba(190,210,255,1)';
       for (let i = 0; i <= count; i++) {
         const t = i * DOT_SPACE;
         ctx.globalAlpha = Math.max(0.04, alpha * (1 - 0.28 * (t / (segLen || 1))));
@@ -3209,10 +3230,10 @@ class Game {
     let py = ly + Math.sin(angle) * barrelLen;
     let pvx = Math.cos(angle), pvy = Math.sin(angle);
     let rem = TOTAL_LEN;
-    let alpha = 0.62;
+    let alpha = 0.38;
 
     ctx.save();
-    for (let bounce = 0; bounce < 5 && rem > 5; bounce++) {
+    for (let bounce = 0; bounce < 3 && rem > 5; bounce++) {
       // Distance to left/right wall
       let tSide = rem + 1;
       if (pvx < -0.001) tSide = (BALL_RADIUS - px) / pvx;
@@ -3237,9 +3258,9 @@ class Game {
 
       // Bounce indicator dot
       ctx.save();
-      ctx.fillStyle   = `rgba(0,245,255,${Math.max(0.10, alpha * 0.85)})`;
-      ctx.shadowColor = '#00f5ff';
-      ctx.shadowBlur  = 14;
+      ctx.fillStyle   = `rgba(190,210,255,${Math.max(0.08, alpha * 0.75)})`;
+      ctx.shadowColor = '#aaccff';
+      ctx.shadowBlur  = 8;
       ctx.beginPath();
       ctx.arc(ex, ey, 4.5, 0, Math.PI * 2);
       ctx.fill();
