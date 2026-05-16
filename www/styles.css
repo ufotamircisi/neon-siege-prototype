@@ -402,7 +402,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px max(64px, calc(var(--sab) + 20px));
+  padding: 6px 10px max(80px, calc(var(--sab) + 32px));
   background: rgba(2,4,20,0.97);
   border-top: 2px solid rgba(0,245,255,0.18);
   box-shadow: 0 -6px 28px rgba(0,0,0,0.75), 0 -1px 0 rgba(0,245,255,0.06);
