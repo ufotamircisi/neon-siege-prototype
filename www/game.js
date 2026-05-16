@@ -19,7 +19,8 @@ let DANGER_ROW = 14;        // blocks reaching this row → game over
 let WARNING_ROW = 13;       // one row above danger → red flash warning
 const UPGRADE_INTERVAL = 5; // every N stages show upgrade choice
 const BOSS_INTERVAL = 10;   // every N stages add boss block
-const FIRE_DELAY = 90;      // ms between successive ball launches
+const FIRE_DELAY = 145;     // ms between successive ball launches — keeps same-angle streams visually distinct
+const MULTI_FIRE_DELAY = 58; // ms for 10x streams — still fast, but no longer visually collapses into one beam
 const MAX_ORBS = 2;         // max ball-pickup orbs on board simultaneously
 const ORB_SPAWN_CHANCE = 0.22; // probability of orb spawn per stage
 const TOTAL_LEVELS = 100;   // V6D: total generated levels
@@ -629,8 +630,9 @@ class Particle {
 }
 
 let particles = [];
-const MAX_PARTICLES = 100;
+const MAX_PARTICLES = 84;
 const MAX_LASER_BEAMS = 8;
+const MAX_FLOATING_TEXTS = 8;
 
 function spawnParticles(x, y, color, count = 10, opts = {}) {
   if (particles.length >= MAX_PARTICLES) return;
@@ -643,6 +645,16 @@ function spawnParticles(x, y, color, count = 10, opts = {}) {
 function spawnExplosionParticles(x, y, color) {
   spawnParticles(x, y, color, 7, { speed: 4.5, decay: 0.04, size: 3 });
   spawnParticles(x, y, '#ffffff', 3, { speed: 6, decay: 0.06, size: 1.8 });
+}
+
+function addFloatingText(text) {
+  if (floatingTexts.length >= MAX_FLOATING_TEXTS) floatingTexts.shift();
+  floatingTexts.push(text);
+}
+
+function addLaserBeam(beam) {
+  if (laserBeams.length >= MAX_LASER_BEAMS) laserBeams.shift();
+  laserBeams.push(beam);
 }
 
 // ============================================================
@@ -786,20 +798,20 @@ class Block {
     // V6F: laser explosion blocks — clear entire row/col on destruction
     if (this.type === BlockType.LASER_H) {
       game._clearRow(this.row);
-      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ff44cc', life: 16 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '— ROW CLEAR!', '#ff44cc'));
+      addLaserBeam({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ff44cc', life: 16 });
+      addFloatingText(new FloatingText(this.cx, this.cy - 26, '— ROW CLEAR!', '#ff44cc'));
     }
     if (this.type === BlockType.LASER_V) {
       game._clearCol(this.col);
-      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#00f5ff', life: 16 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '| COL CLEAR!', '#00f5ff'));
+      addLaserBeam({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#00f5ff', life: 16 });
+      addFloatingText(new FloatingText(this.cx, this.cy - 26, '| COL CLEAR!', '#00f5ff'));
     }
     if (this.type === BlockType.LASER_CROSS) {
       game._clearRow(this.row);
       game._clearCol(this.col);
-      laserBeams.push({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ffee00', life: 16 });
-      laserBeams.push({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#ffee00', life: 16 });
-      floatingTexts.push(new FloatingText(this.cx, this.cy - 26, '+ CROSS CLEAR!', '#ffee00'));
+      addLaserBeam({ x1: 0, y1: this.cy, x2: W, y2: this.cy, color: '#ffee00', life: 16 });
+      addLaserBeam({ x1: this.cx, y1: 0, x2: this.cx, y2: H, color: '#ffee00', life: 16 });
+      addFloatingText(new FloatingText(this.cx, this.cy - 26, '+ CROSS CLEAR!', '#ffee00'));
     }
   }
 
@@ -812,7 +824,7 @@ class Block {
     ctx.save();
     // glow
     ctx.shadowColor = colors.glow;
-    ctx.shadowBlur = flash ? 20 : 8;
+    ctx.shadowBlur = flash ? 14 : 3;
 
     // Shape path — triangles: right-triangle "set-square" tiles; squares: sharp roundRect
     if (this.type === BlockType.TRIANGLE) {
@@ -842,7 +854,7 @@ class Block {
 
     // shield aura
     if (this.shieldActive) {
-      ctx.shadowBlur = 16;
+      ctx.shadowBlur = 8;
       ctx.shadowColor = '#00ccff';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(0,200,255,0.5)';
@@ -854,7 +866,7 @@ class Block {
     if (this.frozen) {
       ctx.save();
       ctx.shadowColor = '#00ccff';
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 5;
       ctx.globalAlpha = 0.28;
       ctx.fillStyle = '#00ccff';
       const _drawTriPath = () => {
@@ -886,7 +898,7 @@ class Block {
       ctx.font = `bold ${blockH > 28 ? 17 : 14}px 'Courier New'`;
       ctx.fillStyle = flash ? '#fff' : '#cc88ff';
       ctx.shadowColor = '#bb44ff';
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 4;
       ctx.fillText('?', x + blockW / 2, y + blockH / 2);
     } else if (this.type === BlockType.LASER_H || this.type === BlockType.LASER_V || this.type === BlockType.LASER_CROSS) {
       const sym = this.type === BlockType.LASER_H ? '—' : this.type === BlockType.LASER_V ? '|' : '+';
@@ -894,7 +906,7 @@ class Block {
       ctx.font = `bold ${blockH > 28 ? 16 : 13}px 'Courier New'`;
       ctx.fillStyle = flash ? '#fff' : symColor;
       ctx.shadowColor = symColor;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 5;
       ctx.fillText(sym, x + blockW / 2, y + blockH / 2 - 4);
       ctx.font = `${blockH > 28 ? 9 : 8}px 'Courier New'`;
       ctx.fillStyle = flash ? '#fff' : 'rgba(255,255,255,0.6)';
@@ -905,7 +917,7 @@ class Block {
       ctx.font = `bold ${blockH > 28 ? 15 : 10}px 'Courier New'`;
       ctx.fillStyle = flash ? '#fff' : (ratio > 0.5 ? '#fff' : '#ff8888');
       ctx.shadowColor = colors.glow;
-      ctx.shadowBlur = 4;
+      ctx.shadowBlur = 2;
       const labelX = this.type === BlockType.TRIANGLE ? x + blockW * 0.33
                    : this.type === BlockType.INV_TRI   ? x + blockW * 0.67
                    : x + blockW / 2;
@@ -920,7 +932,7 @@ class Block {
     if (this.type === BlockType.BOSS) {
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.shadowColor = '#ff0044'; ctx.shadowBlur = 6;
+      ctx.shadowColor = '#ff0044'; ctx.shadowBlur = 3;
       ctx.font = `8px 'Courier New'`; ctx.fillStyle = '#ff0044';
       ctx.fillText('CORE', x + blockW / 2, y + blockH - 6);
       if (this.bossType) {
@@ -1142,7 +1154,7 @@ class BallOrb {
     game.updateHUD();
     spawnParticles(this.x, this.y, '#00f5ff', 14, { speed: 4, decay: 0.028, size: 3 });
     spawnParticles(this.x, this.y, '#bf00ff', 8,  { speed: 3, decay: 0.032, size: 2.5 });
-    floatingTexts.push(new FloatingText(this.x, this.y - 22, '+1 BALL', '#00f5ff'));
+    addFloatingText(new FloatingText(this.x, this.y - 22, '+1 BALL', '#00f5ff'));
     // Flash the HUD ball count
     const el = document.getElementById('balls-count');
     if (el) {
@@ -1294,7 +1306,7 @@ class Ball {
 
     // Trail
     this.trail.push({ x: this.x, y: this.y });
-    if (this.trail.length > 5) this.trail.shift();
+    if (this.trail.length > 2) this.trail.shift();
 
     this.x += this.vx;
     this.y += this.vy;
@@ -1469,39 +1481,34 @@ class Ball {
     const dxC = this.x - bCX, dyC = this.y - bCY;
 
     if (block.type === BlockType.TRIANGLE || block.type === BlockType.INV_TRI) {
-      const INV_SQRT2 = 0.7071067811865476;
-      // Use normalized block-relative position to detect which side of the hypotenuse the ball is on.
-      const relX = (this.x - block.x) / blockW;
-      const relY = (this.y - block.y) / blockH;
-      let nx = 0, ny = 0;
+      const isBackslash = block.type === BlockType.TRIANGLE;
+      const ax = isBackslash ? block.x : block.x + blockW;
+      const ay = block.y;
+      const bx = isBackslash ? block.x + blockW : block.x;
+      const by = block.y + blockH;
+      const sx = bx - ax, sy = by - ay;
+      const segLenSq = sx * sx + sy * sy;
+      const segT = clamp(((this.x - ax) * sx + (this.y - ay) * sy) / segLenSq, 0, 1);
+      const qx = ax + sx * segT, qy = ay + sy * segT;
+      const qdx = this.x - qx, qdy = this.y - qy;
+      const slopeDistSq = qdx * qdx + qdy * qdy;
+      const invNorm = 1 / Math.hypot(blockH, blockW);
+      const nx = isBackslash ? blockH * invNorm : -blockH * invNorm;
+      const ny = -blockW * invNorm;
+      const side = (this.x - qx) * nx + (this.y - qy) * ny;
 
-      if (block.type === BlockType.TRIANGLE) {
-        // \ slope: hypotenuse TL→BR, solid at lower-left.
-        // Ball is on the exposed upper-right side when relY < relX.
-        // Normal points upper-right: (+1, -1)/√2
-        if (relY < relX) {
-          nx =  INV_SQRT2; ny = -INV_SQRT2;
-        }
-      } else {
-        // / slope (INV_TRI): hypotenuse TR→BL, solid at lower-right.
-        // Ball is on the exposed upper-left side when relX + relY < 1.
-        // Normal points upper-left: (-1, -1)/√2
-        if (relX + relY < 1) {
-          nx = -INV_SQRT2; ny = -INV_SQRT2;
-        }
-      }
-
-      if (nx !== 0) {
+      // True circle-vs-segment hit on the exposed diagonal face.
+      if (slopeDistSq <= BALL_RADIUS * BALL_RADIUS && side >= -0.5) {
         const dot = this.vx * nx + this.vy * ny;
         if (dot < 0) {
-          // Reflect velocity off the diagonal face
           this.vx -= 2 * dot * nx;
           this.vy -= 2 * dot * ny;
-          // Push ball away from surface to prevent next-frame re-detection
-          this.x += nx * (BALL_RADIUS + 1);
-          this.y += ny * (BALL_RADIUS + 1);
-          return;
         }
+        const slopeDist = Math.sqrt(Math.max(slopeDistSq, 0.0001));
+        const correction = Math.max(0, BALL_RADIUS - slopeDist) + 0.8;
+        this.x += nx * correction;
+        this.y += ny * correction;
+        return;
       }
     }
 
@@ -1545,13 +1552,13 @@ class Ball {
       ctx.shadowBlur = 0;
       ctx.beginPath();
       for (let i = 0; i < this.trail.length; i++) {
-        const alpha = (i / this.trail.length) * 0.10;
+        const alpha = (i / this.trail.length) * 0.06;
         if (alpha < 0.02) continue;
         const r = Math.max(1, BALL_DRAW_RADIUS * 0.55 * (i / this.trail.length));
         ctx.moveTo(this.trail[i].x + r, this.trail[i].y);
         ctx.arc(this.trail[i].x, this.trail[i].y, r, 0, Math.PI * 2);
       }
-      ctx.globalAlpha = 0.09;
+      ctx.globalAlpha = 0.06;
       ctx.fill();
       ctx.restore();
     }
@@ -1856,10 +1863,10 @@ class Game {
       milestoneMult: isMilestone ? 1.25 : 1.0,                                 // milestone blocks 25% tougher
       // V8: early levels very sparse (70% skip ≈ 2 blocks/row); later levels fill up (28% skip ≈ 5 blocks)
       skipChance:    isMilestone ? 0.12 : Math.max(0.28, 0.70 - stage * 0.018),
-      triChance:     stage >= 5  ? Math.min(0.32, (stage - 4) * 0.04)  : 0,   // triangle blocks
-      mysteryChance: stage >= 4  ? Math.min(0.07, (stage - 3) * 0.010) : 0,   // mystery blocks
+      triChance:     stage >= 5  ? Math.min(0.18, (stage - 4) * 0.022) : 0,   // triangle blocks — reduced density
+      mysteryChance: stage >= 4  ? Math.min(0.04, (stage - 3) * 0.007) : 0,   // mystery blocks
       markerChance:  stage >= 2  ? Math.min(0.30, (stage - 1) * 0.04)  : 0,   // markers
-      laserChance:   stage >= 5  ? Math.min(0.08, (stage - 4) * 0.012) : 0,   // laser explosion blocks
+      laserChance:   stage >= 5  ? Math.min(0.05, (stage - 4) * 0.008) : 0,   // laser explosion blocks
       isMilestone,
     };
   }
@@ -2050,7 +2057,7 @@ class Game {
       if (dangerBlock) {
         const fx = dangerBlock.cx, fy = dangerBlock.cy;
         dangerBlock.row = Math.max(0, dangerBlock.row - 2);
-        floatingTexts.push(new FloatingText(W / 2, H * 0.5, 'EMERGENCY SHIELD!', '#00ccff'));
+        addFloatingText(new FloatingText(W / 2, H * 0.5, 'EMERGENCY SHIELD!', '#00ccff'));
         spawnParticles(fx, fy, '#00ccff', 12, { speed: 3, decay: 0.04 });
         screenShake(4, 3);
       }
@@ -2109,7 +2116,7 @@ class Game {
     if (isMultShot) {
       totalBalls = Math.min(this.ballCount * 10, 300);
       this.ballMultActive = false;
-      floatingTexts.push(new FloatingText(W / 2, H * 0.4, '×10 SHOT!', '#ffee00'));
+      addFloatingText(new FloatingText(W / 2, H * 0.4, '×10 SHOT!', '#ffee00'));
       screenShake(4, 3);
     }
     const piercing = this.hasUpgrade('piercing') ? 3 : 0;
@@ -2123,7 +2130,7 @@ class Game {
     let launched = 0;
     this.pendingBalls = totalBalls;
     const currentShotId = this.shotId;                        // V6B: recall guard
-    const launchDelay   = isMultShot ? Math.max(8, FIRE_DELAY >> 2) : FIRE_DELAY;
+    const launchDelay   = isMultShot ? MULTI_FIRE_DELAY : FIRE_DELAY;
     const launchNext = () => {
       if (launched >= totalBalls || this.shotId !== currentShotId) return; // cancelled by recall
       let a = angle;
@@ -2220,7 +2227,7 @@ class Game {
       }
       case 'mini_laser':
         this._fireLaserRow(row);
-        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
+        addLaserBeam({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 10 });
         break;
       case 'boost_one_hp': {
         const bl = randItem(alive());
@@ -2271,7 +2278,7 @@ class Game {
       }
     }
 
-    floatingTexts.push(new FloatingText(cx, cy - 28, label, color));
+    addFloatingText(new FloatingText(cx, cy - 28, label, color));
     AudioManager.play('mystery');
     this.mysteryProcessing = false;
   }
@@ -2294,7 +2301,7 @@ class Game {
           this.ballCount += bonus;
           this.updateHUD();
           spawnParticles(cx, cy, '#00ff88', 14, { speed: 4, decay: 0.025 });
-          floatingTexts.push(new FloatingText(cx, cy - 24, `+${bonus} BALL${bonus > 1 ? 'S' : ''}!`, '#00ff88'));
+          addFloatingText(new FloatingText(cx, cy - 24, `+${bonus} BALL${bonus > 1 ? 'S' : ''}!`, '#00ff88'));
         }
         break;
       }
@@ -2309,7 +2316,7 @@ class Game {
             positions.sort(() => Math.random() - 0.5);
             picks.forEach((b, i) => { b.col = positions[i].col; b.row = positions[i].row; });
             spawnParticles(cx, cy, '#ff8800', 10, { speed: 4, decay: 0.04 });
-            floatingTexts.push(new FloatingText(cx, cy - 24, 'SHUFFLE!', '#ff8800'));
+            addFloatingText(new FloatingText(cx, cy - 24, 'SHUFFLE!', '#ff8800'));
           }
         }
         break;
@@ -2317,36 +2324,36 @@ class Game {
       case 'laser_h':
         // Every ball touch damages the row — lightweight beam drawn once per trigger
         this._fireLaserRow(marker.row);
-        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 8 });
+        addLaserBeam({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ff44cc', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
-          floatingTexts.push(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
+          addFloatingText(new FloatingText(cx, cy - 24, '— ROW LASER!', '#ff44cc'));
           AudioManager.play('laser');
         }
         break;
       case 'laser_v':
         this._fireLaserCol(marker.col);
-        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 8 });
+        addLaserBeam({ x1: cx, y1: 0, x2: cx, y2: H, color: '#00ccff', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
-          floatingTexts.push(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
+          addFloatingText(new FloatingText(cx, cy - 24, '| COL LASER!', '#00ccff'));
           AudioManager.play('laser');
         }
         break;
       case 'laser_cross':
         this._fireLaserRow(marker.row);
         this._fireLaserCol(marker.col);
-        laserBeams.push({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 8 });
-        laserBeams.push({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 8 });
+        addLaserBeam({ x1: 0, y1: cy, x2: W, y2: cy, color: '#ffee00', life: 8 });
+        addLaserBeam({ x1: cx, y1: 0, x2: cx, y2: H, color: '#ffee00', life: 8 });
         saveData.stats.laserTriggers++;
         Achievements.checkStat('laserTriggers', saveData.stats.laserTriggers);
         if (!marker.triggeredOnce) {
           marker.triggeredOnce = true;
-          floatingTexts.push(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
+          addFloatingText(new FloatingText(cx, cy - 24, '+ CROSS LASER!', '#ffee00'));
           AudioManager.play('laser');
         }
         break;
@@ -2428,7 +2435,7 @@ class Game {
       hit++;
     }
     if (hit > 0) {
-      floatingTexts.push(new FloatingText(W / 2, H * 0.43, '💣 BOMB!', '#ff6600'));
+      addFloatingText(new FloatingText(W / 2, H * 0.43, '💣 BOMB!', '#ff6600'));
       screenShake(12, 7);
       AudioManager.play('bomb');
     }
@@ -2444,7 +2451,7 @@ class Game {
       this.turnPowerUsed = true;
       this.ballMultActive = true;
       this.updatePowerBar();
-      floatingTexts.push(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
+      addFloatingText(new FloatingText(W / 2, H * 0.43, '×10 READY!', '#ffee00'));
       AudioManager.play('mult10');
     } else if (this.phase === GamePhase.SHOOTING && this.lastShotAngle !== null) {
       this.powMult--;
@@ -2464,10 +2471,10 @@ class Game {
         this.balls.push(new Ball(lx, ly, Math.cos(angle) * spd, Math.sin(angle) * spd, { piercingLeft: piercing }));
         launched++;
         this.pendingBalls--;
-        if (launched < totalExtra) setTimeout(launchNext, Math.max(8, FIRE_DELAY >> 2));
+        if (launched < totalExtra) setTimeout(launchNext, MULTI_FIRE_DELAY);
       };
       launchNext();
-      floatingTexts.push(new FloatingText(W / 2, H * 0.4, '×10 BURST!', '#ffee00'));
+      addFloatingText(new FloatingText(W / 2, H * 0.4, '×10 BURST!', '#ffee00'));
       screenShake(4, 3);
     }
   }
@@ -2484,7 +2491,7 @@ class Game {
         b.active = false;
       }
     }
-    floatingTexts.push(new FloatingText(W / 2, H * 0.5, '↓ RECALLED', '#00ccff'));
+    addFloatingText(new FloatingText(W / 2, H * 0.5, '↓ RECALLED', '#00ccff'));
     AudioManager.play('recall');
     this.updatePowerBar();
   }
@@ -2539,7 +2546,7 @@ class Game {
     if (count === 10) { label = 'x10 Siege Frenzy'; color = '#ff6600'; shardBonus = 3; }
     if (count === 20) { label = 'x20 Neon Frenzy';  color = '#ff2200'; shardBonus = 5; }
     if (label) {
-      floatingTexts.push(new ComboText(W / 2, H * 0.42, label, color));
+      addFloatingText(new ComboText(W / 2, H * 0.42, label, color));
       if (shardBonus > 0) this.earnShards(shardBonus);
     }
   }
@@ -2618,7 +2625,7 @@ class Game {
     for (const target of targets) {
       target.hit(1, this);
       spawnParticles(target.cx, target.cy, '#aa44ff', 5, { speed: 3, decay: 0.07, size: 2 });
-      laserBeams.push({ x1: cx, y1: cy, x2: target.cx, y2: target.cy, color: '#aa44ff', life: 5 });
+      addLaserBeam({ x1: cx, y1: cy, x2: target.cx, y2: target.cy, color: '#aa44ff', life: 5 });
     }
     spawnParticles(cx, cy, '#6644ff', 6, { speed: 2.5, decay: 0.08, size: 2.5 });
   }
@@ -2636,17 +2643,17 @@ class Game {
           nb.shieldActive = true;
           spawnParticles(nb.cx, nb.cy, '#00ccff', 6, { speed: 2, decay: 0.06 });
         }
-        if (candidates.length > 0) floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'SHIELD GRANTED!', '#00ccff'));
+        if (candidates.length > 0) addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'SHIELD GRANTED!', '#00ccff'));
         break;
       }
       case 'gravity_core': {
         const existBH = this.blackHoles.find(bh => bh.alive);
         if (existBH) {
           existBH.strength = Math.min(existBH.strength + 0.1, 0.6);
-          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'GRAVITY+!', '#8800ff'));
+          addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'GRAVITY+!', '#8800ff'));
         } else {
           this.blackHoles.push(new BlackHole(boss.cx, boss.cy + (blockH + blockPad) * 1.5));
-          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'VOID OPENED!', '#8800ff'));
+          addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'VOID OPENED!', '#8800ff'));
         }
         spawnParticles(boss.cx, boss.cy, '#8800ff', 10, { speed: 3, decay: 0.05 });
         break;
@@ -2657,7 +2664,7 @@ class Game {
         if (free.length > 0) {
           const summonHp = Math.ceil(this.blockHpForStage(this.stage) * 0.6);
           this.blocks.push(new Block(randItem(free), 0, BlockType.NORMAL, summonHp));
-          floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'SUMMONED!', '#ff8800'));
+          addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'SUMMONED!', '#ff8800'));
           spawnParticles(boss.cx, boss.cy, '#ff8800', 8, { speed: 2.5, decay: 0.05 });
         }
         break;
@@ -2666,14 +2673,14 @@ class Game {
         const targets = this.blocks.filter(b => b.alive && b.type !== BlockType.BOSS)
           .sort(() => Math.random() - 0.5).slice(0, 3);
         for (const t of targets) { t.hp += 3; t.maxHp = Math.max(t.maxHp, t.hp); t.hitFlash = 4; }
-        if (targets.length > 0) floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'CORRUPTED!', '#ff0066'));
+        if (targets.length > 0) addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'CORRUPTED!', '#ff0066'));
         spawnParticles(boss.cx, boss.cy, '#ff0066', 8, { speed: 2.5, decay: 0.05 });
         break;
       }
       case 'laser_core':
         this._fireLaserRow(boss.row);
-        laserBeams.push({ x1: 0, y1: boss.cy, x2: W, y2: boss.cy, color: '#ff0044', life: 10 });
-        floatingTexts.push(new FloatingText(boss.cx, boss.cy - 30, 'PULSE!', '#ff0044'));
+        addLaserBeam({ x1: 0, y1: boss.cy, x2: W, y2: boss.cy, color: '#ff0044', life: 10 });
+        addFloatingText(new FloatingText(boss.cx, boss.cy - 30, 'PULSE!', '#ff0044'));
         break;
     }
     boss.hitFlash = 6;
@@ -2711,7 +2718,7 @@ class Game {
     if (relic.id === 'siege_engine') { this.ballCount += 2; this.updateHUD(); }
     const titleEl = document.querySelector('#screen-upgrade-choice .screen-title');
     if (titleEl) titleEl.textContent = 'CHOOSE UPGRADE';
-    floatingTexts.push(new FloatingText(W / 2, H * 0.5, relic.name + '!', '#ffcc44'));
+    addFloatingText(new FloatingText(W / 2, H * 0.5, relic.name + '!', '#ffcc44'));
     Screens.show('game');
     this.phase = GamePhase.IDLE;
     this.updateHUD();
@@ -2752,7 +2759,7 @@ class Game {
       if (aliveRows.length > 0) {
         const frozenRow = randItem(aliveRows);
         this.blocks.filter(b => b.alive && b.row === frozenRow).forEach(b => { b.frozen = true; b.frozenTurns = 1; });
-        floatingTexts.push(new FloatingText(W / 2, H * 0.35, 'ROW FROZEN!', '#00ccff'));
+        addFloatingText(new FloatingText(W / 2, H * 0.35, 'ROW FROZEN!', '#00ccff'));
         spawnParticles(W / 2, H * 0.4, '#00ccff', 10, { speed: 3.5, decay: 0.04, size: 2.5 });
       }
     }
@@ -2815,8 +2822,8 @@ class Game {
       saveData.multiplier10xCount = this.powMult;
       Save.save(saveData);
       this.updatePowerBar();
-      floatingTexts.push(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
-      floatingTexts.push(new FloatingText(W / 2, H * 0.38, '+1 BOMB  +1 ×10  +SHARDS', '#00ff88'));
+      addFloatingText(new FloatingText(W / 2, H * 0.30, '★ MILESTONE CLEARED! ★', '#ffee00'));
+      addFloatingText(new FloatingText(W / 2, H * 0.38, '+1 BOMB  +1 ×10  +SHARDS', '#00ff88'));
       screenShake(10, 6);
       AudioManager.play('milestone');
       setTimeout(() => this.showRelicChoice(), 700);
@@ -3044,26 +3051,22 @@ class Game {
     for (let gy = 0; gy < H; gy += gSep) { ctx.moveTo(0, gy); ctx.lineTo(W, gy); }
     ctx.stroke();
 
-    // Warning row — subtle red tinted band
+    // Warning row — one clean danger band above the actual loss boundary
     const warningY = blockPad + WARNING_ROW * (blockH + blockPad);
     const rowH_local = blockH + blockPad;
     const wPulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
-    ctx.fillStyle = `rgba(255,60,0,${0.025 + wPulse * 0.025})`;
+    ctx.fillStyle = `rgba(255,20,48,${0.045 + wPulse * 0.035})`;
     ctx.fillRect(0, warningY, W, rowH_local);
-    ctx.strokeStyle = `rgba(255,120,0,${0.20 + wPulse * 0.15})`;
+    ctx.strokeStyle = `rgba(255,60,92,${0.16 + wPulse * 0.14})`;
     ctx.lineWidth = 1;
-    ctx.setLineDash([5, 9]);
     ctx.beginPath(); ctx.moveTo(0, warningY); ctx.lineTo(W, warningY); ctx.stroke();
-    ctx.setLineDash([]);
 
-    // Danger line (subtle red dashed — game over boundary)
+    // Danger line — visual boundary exactly matches row >= DANGER_ROW loss logic
     const dangerY = blockPad + DANGER_ROW * (blockH + blockPad);
     const dangerPulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.004);
-    ctx.strokeStyle = `rgba(255,0,68,${0.28 + dangerPulse * 0.22})`;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([6, 7]);
+    ctx.strokeStyle = `rgba(255,0,68,${0.34 + dangerPulse * 0.18})`;
+    ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(0, dangerY); ctx.lineTo(W, dangerY); ctx.stroke();
-    ctx.setLineDash([]);
 
     // V4B: Black holes (rendered behind blocks)
     for (const bh of this.blackHoles) { bh.update(); if (bh.alive) bh.draw(ctx); }
@@ -3091,8 +3094,8 @@ class Game {
 
     // Balls — skip trail and shadow when many balls active (10x shot) to keep frame budget
     const _ballCount = this.balls.length;
-    const _showBallTrail = _ballCount <= 15;
-    const _useBallShadow = _ballCount <= 22;
+    const _showBallTrail = _ballCount <= 10;
+    const _useBallShadow = _ballCount <= 14;
     for (const ball of this.balls) {
       ball.draw(ctx, _showBallTrail, _useBallShadow);
     }
@@ -3188,7 +3191,7 @@ class Game {
       if (!floatingTexts[_i].dead) floatingTexts[_fi++] = floatingTexts[_i];
     }
     floatingTexts.length = _fi;
-    if (floatingTexts.length > 10) floatingTexts.splice(0, floatingTexts.length - 10);
+    if (floatingTexts.length > MAX_FLOATING_TEXTS) floatingTexts.splice(0, floatingTexts.length - MAX_FLOATING_TEXTS);
   }
 
   // ---- Aim guide — dotted trajectory with wall-bounce prediction ----
@@ -3696,7 +3699,7 @@ document.getElementById('btn-watch-ad-continue').addEventListener('click', () =>
     }
     game.blocks = game.blocks.filter(b => b.alive);
     screenShake(6, 4);
-    floatingTexts.push(new FloatingText(W / 2, H * 0.43, '▶ CONTINUE!', '#00ff88'));
+    addFloatingText(new FloatingText(W / 2, H * 0.43, '▶ CONTINUE!', '#00ff88'));
     game.warningActive = false;
     game.phase = GamePhase.IDLE;
     game.updatePowerBar();
@@ -3910,7 +3913,7 @@ document.getElementById('btn-restore').addEventListener('click', () =>
 
 document.getElementById('btn-about').addEventListener('click', () =>
   showInfoModal('ABOUT / CREDITS',
-    'NEON SIEGE\nArcade Roguelike Prototype\n\nBuilt with HTML5 Canvas.\nNo external libraries.\n\nThank you for playing!'));
+    'NEON SIEGE\nArcade Roguelike Prototype\n\nBuilt with HTML5 Canvas.\nNo external libraries.\n\nBuild: perf-physics-01\n\nThank you for playing!'));
 
 document.getElementById('btn-info-close').addEventListener('click', () => {
   document.getElementById('info-modal').style.display = 'none';
@@ -3974,3 +3977,4 @@ updateMenuDisplay();
 resizeCanvas();
 Screens.show('menu');
 gameLoop();
+
